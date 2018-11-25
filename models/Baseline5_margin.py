@@ -29,6 +29,8 @@ class Baseline5(CQAModel):
                 neghC = tf.tile(negC_, [1, self.Q_maxlen, 1, 1])
                 posH = tf.concat([poshQ, poshC], axis=-1)
                 negH = tf.concat([neghQ, neghC], axis=-1)
+
+
                 posA = tf.layers.dense(posH, units=200, activation=tf.tanh, name='A')  # (B, L1, L2, dim)
                 negA = tf.layers.dense(negH, units=200, activation=tf.tanh, name='A', reuse=True)  # (B, L1, L2, dim)
 

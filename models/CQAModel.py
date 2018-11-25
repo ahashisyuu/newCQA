@@ -61,7 +61,7 @@ class CQAModel:
         # computing loss
         with tf.variable_scope('predict'):
             self.predict_prob = tf.nn.softmax(self.output)
-            labels = tf.one_hot(self.Rel, 3, dtype=tf.float32)
+            labels = tf.one_hot(self.Rel, 2, dtype=tf.float32)
             losses = tf.nn.softmax_cross_entropy_with_logits(labels=labels, logits=self.output)
             self.loss = tf.reduce_mean(losses)
             if self.args.l2_weight != 0:

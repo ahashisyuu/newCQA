@@ -157,7 +157,7 @@ class BatchDatasets:
         self.cTEXT_dev = self.dev_samples['cTEXT_token_index'].values.tolist()
         self.c_len_dev = self.dev_samples['cTEXT_len'].values
         self.qCate_dev = self.dev_samples['cate_index'].values
-        self.rel_dev = self.dev_samples['rel_index'].values
+        self.rel_dev = self.dev_samples['Rrel_index'].values
 
         batch_size = batch_size or self.batch_size
         return self.gen_train_triplets(train_files, batch_size)
@@ -172,7 +172,7 @@ class BatchDatasets:
             cTEXT = self.train_samples['cTEXT_token_index'].values
             c_len = self.train_samples['cTEXT_len'].values
             qCate = self.train_samples['cate_index'].values
-            Rrel = self.train_samples['rel_index'].values
+            Rrel = self.train_samples['Rrel_index'].values
 
             self.qTEXT_train = qTEXT[train_index].tolist()
             self.q_len_train = q_len[train_index]
@@ -195,7 +195,7 @@ class BatchDatasets:
             self.cTEXT_train = self.train_samples['cTEXT_token_index'].values.tolist()
             self.c_len_train = self.train_samples['cTEXT_len'].values
             self.qCate_train = self.train_samples['cate_index'].values
-            self.rel_train = self.train_samples['rel_index'].values
+            self.rel_train = self.train_samples['Rrel_index'].values
 
             self.q_id_dev = self.dev_samples['q_id'].values
             self.c_id_dev = self.dev_samples['c_id'].values
@@ -204,7 +204,7 @@ class BatchDatasets:
             self.cTEXT_dev = self.dev_samples['cTEXT_token_index'].values.tolist()
             self.c_len_dev = self.dev_samples['cTEXT_len'].values
             self.qCate_dev = self.dev_samples['cate_index'].values
-            self.rel_dev = self.dev_samples['rel_index'].values
+            self.rel_dev = self.dev_samples['Rrel_index'].values
 
         self.train_steps_num = self.rel_train.shape[0]
         self.cweight = self.compute_class_weight(self.rel_train)
@@ -230,7 +230,7 @@ class BatchDatasets:
         self.cTEXT_test = self.test_samples['cTEXT_token_index'].values.tolist()
         self.c_len_test = self.test_samples['cTEXT_len'].values
         self.qCate_test = self.test_samples['cate_index'].values
-        self.rel_test = self.test_samples['rel_index'].values
+        self.rel_test = self.test_samples['Rrel_index'].values
 
         if test_batch_size is None:
             test_batch_size = self.batch_size

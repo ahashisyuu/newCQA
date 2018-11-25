@@ -127,7 +127,7 @@ class Baseline5(CQAModel):
             info = tf.concat([Q_vec, C_vec], axis=1)
             info = Dropout(info, keep_prob=self.dropout_keep_prob, is_train=self._is_train)
             median = tf.layers.dense(info, 300, activation=tf.tanh)
-            output = tf.layers.dense(median, 3, activation=tf.identity)
+            output = tf.layers.dense(median, 2, activation=tf.identity)
 
             return output
 

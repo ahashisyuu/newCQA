@@ -60,11 +60,6 @@ class BatchDatasets:
                                    for index in skf.split(self.train_samples['qTEXT_token_index'].values,
                                                           self.train_samples['rel_index'].values)]
 
-        if need_shuffle:
-            self.shuffle_index = [i for i in range(len(self.train_samples))]
-            np.random.shuffle(self.shuffle_index)
-            self.train_samples = self.train_samples.iloc[self.shuffle_index]
-
         # load triplets training samples
         with open(os.path.join(triplets_file), 'rb') as fr:
             self.data_triplets = pkl.load(fr)
@@ -152,9 +147,9 @@ class BatchDatasets:
     def batch_train_triplets(self, batch_size=None, train_files=None):
         self.q_id_dev = self.dev_samples['q_id'].values
         self.c_id_dev = self.dev_samples['c_id'].values
-        self.qTEXT_dev = self.dev_samples['qTEXT_token_index'].values.tolist()
+        self.qTEXT_dev = self.dev_samples['qTEXT_lemma_index'].values.tolist()
         self.q_len_dev = self.dev_samples['qTEXT_len'].values
-        self.cTEXT_dev = self.dev_samples['cTEXT_token_index'].values.tolist()
+        self.cTEXT_dev = self.dev_samples['cTEXT_lemma_index'].values.tolist()
         self.c_len_dev = self.dev_samples['cTEXT_len'].values
         self.qCate_dev = self.dev_samples['cate_index'].values
         self.rel_dev = self.dev_samples['Rrel_index'].values
@@ -167,9 +162,9 @@ class BatchDatasets:
             train_index, dev_index = self.index_list[fold_num]
             q_id = self.train_samples['q_id'].values
             c_id = self.train_samples['c_id'].values
-            qTEXT = self.train_samples['qTEXT_token_index'].values
+            qTEXT = self.train_samples['qTEXT_lemma_index'].values
             q_len = self.train_samples['qTEXT_len'].values
-            cTEXT = self.train_samples['cTEXT_token_index'].values
+            cTEXT = self.train_samples['cTEXT_lemma_index'].values
             c_len = self.train_samples['cTEXT_len'].values
             qCate = self.train_samples['cate_index'].values
             Rrel = self.train_samples['Rrel_index'].values
@@ -190,18 +185,22 @@ class BatchDatasets:
             self.qCate_dev = qCate[dev_index]
             self.rel_dev = Rrel[dev_index]
         else:
-            self.qTEXT_train = self.train_samples['qTEXT_token_index'].values.tolist()
+            if self.need_shuffle:
+                shuffle_index = [i for i in range(len(self.train_samples))]
+                np.random.shuffle(shuffle_index)
+                self.train_samples = self.train_samples.iloc[shuffle_index]
+            self.qTEXT_train = self.train_samples['qTEXT_lemma_index'].values.tolist()
             self.q_len_train = self.train_samples['qTEXT_len'].values
-            self.cTEXT_train = self.train_samples['cTEXT_token_index'].values.tolist()
+            self.cTEXT_train = self.train_samples['cTEXT_lemma_index'].values.tolist()
             self.c_len_train = self.train_samples['cTEXT_len'].values
             self.qCate_train = self.train_samples['cate_index'].values
             self.rel_train = self.train_samples['Rrel_index'].values
 
             self.q_id_dev = self.dev_samples['q_id'].values
             self.c_id_dev = self.dev_samples['c_id'].values
-            self.qTEXT_dev = self.dev_samples['qTEXT_token_index'].values.tolist()
+            self.qTEXT_dev = self.dev_samples['qTEXT_lemma_index'].values.tolist()
             self.q_len_dev = self.dev_samples['qTEXT_len'].values
-            self.cTEXT_dev = self.dev_samples['cTEXT_token_index'].values.tolist()
+            self.cTEXT_dev = self.dev_samples['cTEXT_lemma_index'].values.tolist()
             self.c_len_dev = self.dev_samples['cTEXT_len'].values
             self.qCate_dev = self.dev_samples['cate_index'].values
             self.rel_dev = self.dev_samples['Rrel_index'].values
@@ -225,9 +224,9 @@ class BatchDatasets:
 
         self.q_id_test = self.test_samples['q_id'].values
         self.c_id_test = self.test_samples['c_id'].values
-        self.qTEXT_test = self.test_samples['qTEXT_token_index'].values.tolist()
+        self.qTEXT_test = self.test_samples['qTEXT_lemma_index'].values.tolist()
         self.q_len_test = self.test_samples['qTEXT_len'].values
-        self.cTEXT_test = self.test_samples['cTEXT_token_index'].values.tolist()
+        self.cTEXT_test = self.test_samples['cTEXT_lemma_index'].values.tolist()
         self.c_len_test = self.test_samples['cTEXT_len'].values
         self.qCate_test = self.test_samples['cate_index'].values
         self.rel_test = self.test_samples['Rrel_index'].values

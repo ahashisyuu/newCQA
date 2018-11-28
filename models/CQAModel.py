@@ -1,3 +1,4 @@
+import math
 import os
 import random
 
@@ -184,9 +185,8 @@ class CQAModel:
             tag="{}/MAP".format(eva_type), simple_value=MAP), ])
         AvgRec_summ = tf.Summary(value=[tf.Summary.Value(
             tag="{}/AvgRec".format(eva_type), simple_value=AvgRec), ])
-        MRR = tf.Summary(value=[tf.Summary.Value(
+        MRR_summ = tf.Summary(value=[tf.Summary.Value(
             tag="{}/MRR".format(eva_type), simple_value=MRR), ])
-
 
         loss_summ = tf.Summary(value=[tf.Summary.Value(
             tag="{}/loss".format(eva_type), simple_value=metrics['loss']), ])
@@ -194,34 +194,35 @@ class CQAModel:
             tag="{}/f1".format(eva_type), simple_value=metrics['macro_prf'][2]), ])
         acc = tf.Summary(value=[tf.Summary.Value(
             tag="{}/acc".format(eva_type), simple_value=metrics['acc']), ])
-        return metrics, [loss_summ, macro_F_summ, acc, MAP_summ, AvgRec_summ, MRR]
+        return metrics, [loss_summ, macro_F_summ, acc, MAP_summ, AvgRec_summ, MRR_summ]
 
     def one_train(self, batch_dataset, saver, writer, config, fold_num=None):
         loss_save = 100
-        patience = 0
+        patience_loss = 0
+        map_save = 0
+        patience_map = 0
         self.lr = config.lr
         self.dropout = config.dropout
-
-        print('---------------------------------------------')
-        print('process train data')
-        train_data = [batch for batch in batch_dataset.batch_train_data(fold_num=fold_num)]
-        train_steps = batch_dataset.train_steps_num
-        print('---------------------------------------------')
-
-        print('class weight: ', batch_dataset.cweight)
-        # self.cweight = [.9, 5., 1.1]
-
-        print('\n---------------------------------------------')
-        print('process dev data')
-        dev_data = [batch for batch in batch_dataset.batch_dev_data()]
-        dev_steps = batch_dataset.dev_steps_num
-        dev_id = batch_dataset.c_id_dev
-        print('----------------------------------------------\n')
-        # print(list(zip(dev_data[0][0], dev_data[0][-1])))
 
         for epoch in range(1, config.epochs + 1):
             print('---------------------------------------')
             print('EPOCH %d' % epoch)
+
+            print('---------------------------------------------')
+            print('process train data')
+            train_data = [batch for batch in batch_dataset.batch_train_data(fold_num=fold_num)]
+            train_steps = batch_dataset.train_steps_num
+            print('---------------------------------------------')
+
+            print('class weight: ', batch_dataset.cweight)
+            # self.cweight = [.9, 5., 1.1]
+
+            print('\n---------------------------------------------')
+            print('process dev data')
+            dev_data = [batch for batch in batch_dataset.batch_dev_data()]
+            dev_steps = batch_dataset.dev_steps_num
+            dev_id = batch_dataset.c_id_dev
+            print('----------------------------------------------\n')
 
             print('the number of samples: %d\n' % train_steps)
 
@@ -246,14 +247,22 @@ class CQAModel:
 
                         if val_metrics['loss'] < loss_save:
                             loss_save = val_metrics['loss']
-                            patience = 0
+                            patience_loss = 0
                         else:
-                            patience += 1
+                            patience_loss += 1
 
-                        if patience >= config.patience:
+                        if patience_loss >= config.patience:
                             self.lr = self.lr / 2.0
                             loss_save = val_metrics['loss']
-                            patience = 0
+                            patience_loss = 0
+
+                        if math.fabs(val_metrics['MAP'] - map_save) < 0.0001:
+                            patience_map += 1
+                        else:
+                            patience_map = 0
+                            map_save = val_metrics['MAP']
+                        if patience_map >= config.patience:
+                            return val_metrics['MAP']
 
                         for s in summ:
                             writer.add_summary(s, self.global_step)
@@ -266,14 +275,16 @@ class CQAModel:
                             path = os.path.join(path, 'fold_%d' % fold_num)
                             if not os.path.exists(path):
                                 os.mkdir(path)
-                        filename = os.path.join(path, "epoch{0}_acc{1:.4f}_fscore{2:.4f}.model"
-                                                .format(epoch, val_metrics['acc'], val_metrics['each_prf'][2][0]))
+                        filename = os.path.join(path, "epoch{0}_MAP{1:.4f}_Avg{2:.4f}_MRR{3:.4f}.model"
+                                                .format(epoch, val_metrics['MAP'], val_metrics['AvgRec'], val_metrics['MRR']))
 
                         # print_metrics(metrics, 'train', path, categories_num=self.args.categories_num)
-                        print_metrics(val_metrics, 'val', path)
+                        # print_metrics(val_metrics, 'val', path)
                         saver.save(self.sess, filename)
 
                     tbar.update(batch_dataset.batch_size)
+
+        return 0
 
     def train(self, batch_dataset: BatchDatasets, config):
         with self.sess:
@@ -296,6 +307,7 @@ class CQAModel:
                     writer = tf.summary.FileWriter(path)
                     self.one_train(batch_dataset, saver, writer, config, i)
                     tf.reset_default_graph()
+                return None
             else:
                 if config.load_best_model and os.path.exists(path):
                     print('------------  load model  ------------')
@@ -303,7 +315,7 @@ class CQAModel:
                 if not os.path.exists(path):
                     os.mkdir(path)
                 writer = tf.summary.FileWriter(path)
-                self.one_train(batch_dataset, saver, writer, config)
+                return self.one_train(batch_dataset, saver, writer, config)
 
     def one_test(self, batch_dataset, config):
         test_data = [batch for batch in batch_dataset.batch_test_data(2 * config.batch_size)]

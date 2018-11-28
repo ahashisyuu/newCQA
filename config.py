@@ -12,7 +12,7 @@ class Config:
     patience = 5
     k_fold = 0
     categories_num = 2
-    period = 100
+    period = 150
 
     need_punct = False
     wipe_num = 0
@@ -20,7 +20,7 @@ class Config:
     word_trainable = True
     need_shuffle = True
     use_char_level = False
-    load_best_model = False
+    load_best_model = True
 
     model_dir = './models/CQAModel'
     log_dir = './models/CQAModel'

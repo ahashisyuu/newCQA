@@ -1,6 +1,7 @@
 import argparse
 import json
 import pickle as pkl
+import tensorflow as tf
 
 from config import Config
 from data import BatchDatasets
@@ -11,9 +12,9 @@ config = Config()
 parser = argparse.ArgumentParser()
 
 parser.add_argument('--mode', type=str, default='train')
-parser.add_argument('--model', type=str, default='Baseline5')
-parser.add_argument('--train_list', type=list, default=['16train1', '16train2', '15train', '15dev', '15test'])
-parser.add_argument('--dev_list', type=list, default=['16dev'])
+parser.add_argument('--model', type=str, default='Baseline5_finetune_lemma')
+parser.add_argument('--train_list', type=list, default=['16train1', '16train2', '15train', '15dev', '15test', '16dev'])
+parser.add_argument('--dev_list', type=list, default=['16test'])
 parser.add_argument('--test_list', type=list, default=['16test'])
 
 parser.add_argument('--lr', type=float, default=config.lr)
@@ -43,30 +44,41 @@ parser.add_argument('--glove_file', type=str, default=config.glove_filename)
 
 
 def run(args):
-    # loading preprocessed data
-    with open('./data/dataset.pkl', 'rb') as fr, \
-         open('./assist/embedding_matrix_lemma.pkl', 'rb') as fr_embed, \
-         open('./assist/char2index.json', 'r') as fr_char:
-        data = pkl.load(fr)
-        embedding_matrix = pkl.load(fr_embed)
-        char2index = json.load(fr_char)
+    map_save = 0
+    map_res = 0.1
+    while map_save < map_res:
+        map_save = map_res
+        # loading preprocessed data
+        with open('./data/dataset.pkl', 'rb') as fr, \
+             open('./assist/embedding_matrix_lemma.pkl', 'rb') as fr_embed, \
+             open('./assist/char2index.json', 'r') as fr_char:
+            data = pkl.load(fr)
+            embedding_matrix = pkl.load(fr_embed)
+            char2index = json.load(fr_char)
 
-    train_samples = [data[k + '.xml'] for k in args.train_list]
-    dev_samples = [data[k + '.xml'] for k in args.dev_list]
-    test_samples = [data[k + '.xml'] for k in args.test_list]
+        train_samples = [data[k + '.xml'] for k in args.train_list]
+        dev_samples = [data[k + '.xml'] for k in args.dev_list]
+        test_samples = [data[k + '.xml'] for k in args.test_list]
 
-    all_data = BatchDatasets(args.q_max_len, args.c_max_len, args.char_max_len,
-                             need_shuffle=args.need_shuffle, use_char_level=args.use_char_level,
-                             batch_size=args.batch_size, k_fold=args.k_fold,
-                             train_samples=train_samples, dev_samples=dev_samples, test_samples=test_samples,
-                             triplets_file='./data/data_triplets.pkl')
+        all_data = BatchDatasets(args.q_max_len, args.c_max_len, args.char_max_len,
+                                 need_shuffle=args.need_shuffle, use_char_level=args.use_char_level,
+                                 batch_size=args.batch_size, k_fold=args.k_fold,
+                                 train_samples=train_samples, dev_samples=dev_samples, test_samples=test_samples,
+                                 triplets_file='./data/data_triplets.pkl')
 
-    model = model_dict[args.model](embedding_matrix=embedding_matrix, args=args, char_num=len(char2index))
+        model = model_dict[args.model](embedding_matrix=embedding_matrix, args=args, char_num=len(char2index))
 
-    if args.mode == 'train':
-        model.train(all_data, args)
-    elif args.mode == 'test':
-        model.test(all_data, args)
+        if args.mode == 'train':
+            map_res = model.train(all_data, args)
+            tf.reset_default_graph()
+            print('=============================================')
+            print('\tmap save: ', map_save)
+            print('\tmap res: ', map_res)
+            print('=============================================')
+        elif args.mode == 'test':
+            model.test(all_data, args)
+
+        del model
 
 
 if __name__ == '__main__':

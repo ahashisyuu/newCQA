@@ -92,8 +92,8 @@ class Baseline5(CQAModel):
                 C_ = tf.expand_dims(C_sequence, axis=1)  # (B, 1, L2, dim)
                 hQ = tf.tile(Q_, [1, 1, self.C_maxlen, 1])
                 hC = tf.tile(C_, [1, self.Q_maxlen, 1, 1])
-                H = tf.concat([hQ, hC], axis=-1)
-                # H = tf.concat([tf.abs(hQ - hC), hQ * hC], axis=-1)
+                # H = tf.concat([hQ, hC], axis=-1)
+                H = tf.concat([tf.abs(hQ - hC)], axis=-1)
                 A = tf.layers.dense(H, units=200, activation=tf.tanh)  # (B, L1, L2, dim)
 
                 rQ = tf.reduce_max(A, axis=2)

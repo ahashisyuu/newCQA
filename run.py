@@ -26,6 +26,7 @@ parser.add_argument('--epochs', type=int, default=config.epochs)
 parser.add_argument('--batch_size', type=int, default=config.batch_size)
 parser.add_argument('--char_dim', type=int, default=config.char_dim)
 parser.add_argument('--l2_weight', type=int, default=config.l2_weight)
+parser.add_argument('--margin', type=float, default=config.margin)
 
 parser.add_argument('--patience', type=int, default=config.patience)
 parser.add_argument('--k_fold', type=int, default=config.k_fold)

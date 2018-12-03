@@ -13,7 +13,7 @@ EPSILON = 1e-7
 
 class CQAModel:
 
-    def __init__(self, embedding_matrix, args, margin=0.25, char_num=128):
+    def __init__(self, embedding_matrix, args, char_num=128):
         # session info
         sess_config = tf.ConfigProto()
         sess_config.gpu_options.allow_growth = True
@@ -62,7 +62,7 @@ class CQAModel:
 
         # computing loss
         with tf.variable_scope('loss'):
-            original_loss = tf.reduce_sum(margin - self.pos_score + self.neg_score)
+            original_loss = tf.reduce_sum(self.args.margin - self.pos_score + self.neg_score)
             self.loss = tf.cond(tf.less(0.0, original_loss), lambda: original_loss, lambda: tf.constant(0.0))
             if self.args.l2_weight != 0:
                 for v in tf.trainable_variables():
@@ -169,6 +169,7 @@ class CQAModel:
                              self.NegC_len: batch_c_len,
                              self.Qcate: batch_cate}
                 batch_scores = self.sess.run(self.pos_score, feed_dict=feed_dict)
+
                 scores.append(batch_scores)
                 rel.append(batch_rel)
                 tbar.update(batch_rel.shape[0])
@@ -216,6 +217,7 @@ class CQAModel:
 
             print('training model')
             self.is_train = True
+            self.dropout = config.dropout
 
             with tqdm(total=train_steps, ncols=70) as tbar:
                 for batch_train_data in train_data:
@@ -229,6 +231,7 @@ class CQAModel:
                         print('\n---------------------------------------')
                         print('\nevaluating model\n')
                         self.is_train = False
+                        self.dropout = 0.
 
                         val_metrics, summ = self.evaluate(dev_data, dev_steps, 'dev', dev_id)
                         val_metrics['epoch'] = epoch

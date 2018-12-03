@@ -8,6 +8,7 @@ class Config:
     batch_size = 20
     char_dim = 15
     l2_weight = 0
+    margin = 1
 
     patience = 5
     k_fold = 0
@@ -17,7 +18,7 @@ class Config:
     need_punct = False
     wipe_num = 0
 
-    word_trainable = True
+    word_trainable = False
     need_shuffle = True
     use_char_level = False
     load_best_model = True

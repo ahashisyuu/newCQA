@@ -3,7 +3,8 @@ import math
 import tensorflow as tf
 
 from .CQAModel import CQAModel
-from layers.BiGRU import NativeGRU as BiGRU, Dropout
+from layers.BiGRU import CudnnGRU as BiGRU, Dropout
+from layers.BiLSTM import NativeLSTM as BiLSTM
 
 
 def add_timing_signal_1d(x, min_timescale=1.0, max_timescale=1.0e4):
@@ -80,13 +81,11 @@ class Baseline5(CQAModel):
             Q_len, C_len = self.Q_len, self.C_len
 
             with tf.variable_scope('encode'):
-                Q = add_timing_signal_1d(Q)
-                C = add_timing_signal_1d(C)
-                Q = Dropout(Q, keep_prob=self.dropout_keep_prob, is_train=self._is_train)
-                C = Dropout(C, keep_prob=self.dropout_keep_prob, is_train=self._is_train)
-
-                Q_sequence = tf.layers.conv1d(Q, filters=200, kernel_size=3, padding='same')
-                C_sequence = tf.layers.conv1d(C, filters=200, kernel_size=3, padding='same')
+                rnn1 = BiGRU(num_layers=1, num_units=units,
+                             batch_size=tf.shape(self.QS)[0], input_size=self.CT.get_shape()[-1],
+                             keep_prob=self.dropout_keep_prob, is_train=self._is_train)
+                Q_sequence = rnn1(Q, seq_len=Q_len, return_type=1)
+                C_sequence = rnn1(C, seq_len=C_len, return_type=1)
 
             with tf.variable_scope('interaction'):
                 Q_ = tf.expand_dims(Q_sequence, axis=2)  # (B, L1, 1, dim)

@@ -8,8 +8,68 @@ import keras.losses
 from utils import PRF, print_metrics, eval_reranker
 from tqdm import tqdm
 from data import BatchDatasets
+from layers.BiGRU import Dropout
 
 EPSILON = 1e-7
+
+
+class TextCNN:
+    def __init__(self, input_dim, filter_sizes, filter_num):
+        self.filter_sizes = filter_sizes
+        self.filters = []
+        self.bs = []
+        for filter_size in filter_sizes:
+            with tf.variable_scope("conv{}".format(filter_size)):
+                filter_shape = tf.convert_to_tensor([filter_size, input_dim, 1, filter_num])
+                fil = tf.Variable(tf.truncated_normal(filter_shape, stddev=0.1), name='filter')
+                b = tf.Variable(tf.constant(0.1, shape=[filter_num]))
+
+                self.filters.append(fil)
+                self.bs.append(b)
+
+    def __call__(self, inputs, mask=None):
+        pooled_outputs = []
+        inputs = inputs * tf.expand_dims(mask, axis=-1) if mask is not None else inputs
+        input_expand = tf.expand_dims(inputs, -1)  # (b,m,d,1)
+        for filter_size, fil, b in zip(self.filter_sizes, self.filters, self.bs):
+            with tf.variable_scope("conv{}".format(filter_size)):
+                conv = tf.nn.conv2d(input_expand, fil, [1]*4, 'VALID', name='conv')
+                h = tf.nn.relu(tf.nn.bias_add(conv, b))
+                pooled = tf.reduce_max(h, 1, True)
+                pooled_outputs.append(tf.squeeze(pooled, axis=[1, 2]))
+        return tf.concat(pooled_outputs, 1)
+
+
+class MultiLayerHighway:
+    def __init__(self, units, layers_num,
+                 activation=tf.nn.elu, keep_prob=1.0, is_train=True, need_bias=True, scope=None):
+        self.units = units
+        self.layers_num = layers_num
+        self.activation = activation
+        self.keep_prob = keep_prob
+        self.is_train = is_train
+        self.need_bias = need_bias
+        self.first_use = True
+        self.scope = scope or 'MulHighway'
+
+    def __call__(self, inputs):
+        with tf.variable_scope(self.scope):
+            output = inputs
+            reuse = True if self.first_use is False else None
+            for i in range(self.layers_num):
+                output_line = Dropout(output, self.keep_prob, self.is_train)
+                output_gate = Dropout(output, self.keep_prob, self.is_train)
+                output_tran = Dropout(output, self.keep_prob, self.is_train)
+
+                line = tf.layers.dense(output_line, self.units, tf.identity,
+                                       self.need_bias, name='line_%d' % i, reuse=reuse)
+                gate = tf.layers.dense(output_gate, self.units, tf.sigmoid,
+                                       self.need_bias, name='gate_%d' % i, reuse=reuse)
+                tran = tf.layers.dense(output_tran, self.units, self.activation,
+                                       self.need_bias, name='tran_%d' % i, reuse=reuse)
+                output = gate * tran + (1 - gate) * line
+            self.first_use = False
+            return output
 
 
 class CQAModel:
@@ -43,7 +103,7 @@ class CQAModel:
         self.N = None
 
         # batch input
-        self.inputs = self.QText, self.Q_len, self.CText, self.C_len, self.Qcate, self.Rel = self.create_input()
+        self.inputs = self.QText, self.Q_len, self.CText, self.C_len, self.Q_char, self.C_char, self.Qcate, self.Rel = self.create_input()
 
         # preparing mask and length info
         self.Q_mask = tf.cast(tf.cast(self.QText, tf.bool), tf.float32)
@@ -73,8 +133,8 @@ class CQAModel:
         self.count()
 
         # getting ready for training
-        self.opt = tf.train.AdagradOptimizer(learning_rate=self._lr)
-        # self.opt = tf.train.AdamOptimizer(learning_rate=self._lr, epsilon=1e-6)
+        # self.opt = tf.train.AdagradOptimizer(learning_rate=self._lr)
+        self.opt = tf.train.AdamOptimizer(learning_rate=self._lr, epsilon=1e-6)
         grads = self.opt.compute_gradients(self.loss)
         gradients, variables = zip(*grads)
         capped_grads, _ = tf.clip_by_global_norm(gradients, clip_norm=5.0)
@@ -86,7 +146,9 @@ class CQAModel:
         q_len = tf.placeholder(tf.int32, [None])
         cTEXT = tf.placeholder(tf.int32, [None, None])
         c_len = tf.placeholder(tf.int32, [None])
-        inputs = [qTEXT, q_len, cTEXT, c_len]
+        q_char = tf.placeholder(tf.int32, [None, None, None])
+        c_char = tf.placeholder(tf.int32, [None, None, None])
+        inputs = [qTEXT, q_len, cTEXT, c_len, q_char, c_char]
 
         cate = tf.placeholder(tf.int32, [None])
         rel = tf.placeholder(tf.int32, [None])
@@ -99,13 +161,33 @@ class CQAModel:
             QS = tf.nn.embedding_lookup(self.word_mat, self.QText)
             CT = tf.nn.embedding_lookup(self.word_mat, self.CText)
 
-            embedded = [QS, CT]
+            if self.args.use_char_level:
+                self.char_embedding = tf.get_variable('char_mat', [self.char_num + 1, self.args.char_dim],
+                                                      trainable=self.args.char_trainable)
+                q_char = tf.reshape(self.Q_char, [-1, tf.shape(self.Q_char)[2]])
+                c_char = tf.reshape(self.C_char, [-1, tf.shape(self.C_char)[2]])
+                q_cmask = tf.cast(tf.cast(q_char, tf.bool), tf.float32)
+                c_cmask = tf.cast(tf.cast(c_char, tf.bool), tf.float32)
+
+                q_char_emb = tf.nn.embedding_lookup(self.char_embedding, q_char)
+                c_char_emb = tf.nn.embedding_lookup(self.char_embedding, c_char)
+
+                text_cnn = TextCNN(self.args.char_dim, [1, 2, 3, 4, 5, 6], 50)
+                q_char_emb = text_cnn(q_char_emb, q_cmask)
+                c_char_emb = text_cnn(c_char_emb, c_cmask)
+
+                QS = tf.concat([QS, tf.reshape(q_char_emb, [self.N, -1, 300])], -1)
+                CT = tf.concat([CT, tf.reshape(c_char_emb, [self.N, -1, 300])], -1)
+
+            highway = MultiLayerHighway(300, 1, tf.nn.elu, self.dropout_keep_prob, self._is_train)
+            QS = highway(QS)
+            CT = highway(CT)
 
             category_mat = tf.get_variable('cate_mat', shape=[33, 25], dtype=tf.float32,
                                            initializer=tf.glorot_uniform_initializer(), trainable=False)
             cate_f = tf.nn.embedding_lookup(category_mat, self.Qcate)
 
-            return embedded + [cate_f]
+            return [QS, CT, cate_f]
 
     @property
     def cweight(self):
@@ -228,6 +310,7 @@ class CQAModel:
 
             print('training model')
             self.is_train = True
+            self.dropout = config.dropout
 
             with tqdm(total=train_steps, ncols=70) as tbar:
                 for batch_train_data in train_data:
@@ -241,6 +324,7 @@ class CQAModel:
                         print('\n---------------------------------------')
                         print('\nevaluating model\n')
                         self.is_train = False
+                        self.dropout = 1.0
 
                         val_metrics, summ = self.evaluate(dev_data, dev_steps, 'dev', dev_id)
                         val_metrics['epoch'] = epoch
@@ -271,6 +355,13 @@ class CQAModel:
                         path = os.path.join(config.model_dir, self.__class__.__name__)
                         if not os.path.exists(path):
                             os.mkdir(path)
+                        # else:
+                        #     for i in range(10):
+                        #         if not os.path.exists(path + '_{}'.format(i+1)):
+                        #             path = path + '_{}'.format(i+1)
+                        #             os.mkdir(path)
+                        #             break
+
                         if fold_num is not None:
                             path = os.path.join(path, 'fold_%d' % fold_num)
                             if not os.path.exists(path):

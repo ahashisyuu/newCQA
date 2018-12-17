@@ -12,8 +12,8 @@ config = Config()
 parser = argparse.ArgumentParser()
 
 parser.add_argument('--mode', type=str, default='train')
-parser.add_argument('--model', type=str, default='Baseline5')
-parser.add_argument('--train_list', type=list, default=['16train1', '16train2', '15train', '15dev', '15test', '16dev'])
+parser.add_argument('--model', type=str, default='Baseline3')
+parser.add_argument('--train_list', type=list, default=['15train', '15dev', '15test', '16train1', '16train2', '16dev'])
 parser.add_argument('--dev_list', type=list, default=['16test'])
 parser.add_argument('--test_list', type=list, default=['16test'])
 
@@ -35,13 +35,14 @@ parser.add_argument('--period', type=int, default=config.period)
 parser.add_argument('--wipe_num', type=int, default=config.wipe_num)
 
 parser.add_argument('--word_trainable', type=bool, default=config.word_trainable)
+parser.add_argument('--char_trainable', type=bool, default=config.char_trainable)
 parser.add_argument('--need_shuffle', type=bool, default=config.need_shuffle)
 parser.add_argument('--use_char_level', type=bool, default=config.use_char_level)
 parser.add_argument('--load_best_model', type=bool, default=config.load_best_model)
 
 parser.add_argument('--model_dir', type=str, default=config.model_dir)
 parser.add_argument('--log_dir', type=str, default=config.log_dir)
-parser.add_argument('--glove_file', type=str, default=config.glove_filename)
+parser.add_argument('--word_type', type=str, default=config.word_type)
 
 
 def run(args):
@@ -51,7 +52,7 @@ def run(args):
         map_save = map_res
         # loading preprocessed data
         with open('./data/dataset.pkl', 'rb') as fr, \
-             open('./assist/embedding_matrix_lemma.pkl', 'rb') as fr_embed, \
+             open('./assist/embedding_matrix_{}.pkl'.format(args.word_type), 'rb') as fr_embed, \
              open('./assist/char2index.json', 'r') as fr_char:
             data = pkl.load(fr)
             embedding_matrix = pkl.load(fr_embed)
@@ -61,7 +62,7 @@ def run(args):
         dev_samples = [data[k + '.xml'] for k in args.dev_list]
         test_samples = [data[k + '.xml'] for k in args.test_list]
 
-        all_data = BatchDatasets(args.q_max_len, args.c_max_len, args.char_max_len,
+        all_data = BatchDatasets(args.q_max_len, args.c_max_len, args.char_max_len, args.word_type,
                                  need_shuffle=args.need_shuffle, use_char_level=args.use_char_level,
                                  batch_size=args.batch_size, k_fold=args.k_fold,
                                  train_samples=train_samples, dev_samples=dev_samples, test_samples=test_samples,

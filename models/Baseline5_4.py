@@ -61,7 +61,7 @@ def get_timing_signal_1d(length, channels, min_timescale=1.0, max_timescale=1.0e
     position = tf.to_float(tf.range(length))
     num_timescales = channels // 2
     log_timescale_increment = (
-        math.log(float(max_timescale) / float(min_timescale)) /
+            math.log(float(max_timescale) / float(min_timescale)) /
             (tf.to_float(num_timescales) - 1))
     inv_timescales = min_timescale * tf.exp(
         tf.to_float(tf.range(num_timescales)) * -log_timescale_increment)
@@ -72,7 +72,7 @@ def get_timing_signal_1d(length, channels, min_timescale=1.0, max_timescale=1.0e
     return signal
 
 
-class Baseline5(CQAModel):
+class Baseline5_4(CQAModel):
     def build_model(self):
         with tf.variable_scope('ai_cnn', initializer=tf.glorot_uniform_initializer()):
             units = 300
@@ -95,38 +95,24 @@ class Baseline5(CQAModel):
                 hC = tf.tile(C_, [1, self.Q_maxlen, 1, 1])
                 H = tf.concat([hQ, hC], axis=-1)
                 # H = tf.concat([tf.abs(hQ - hC)], axis=-1)
-                A = tf.layers.dense(H, units=200, activation=tf.tanh)  # (B, L1, L2, dim)
+                units = 200
+                A = tf.layers.dense(H, units=units, activation=tf.tanh)  # (B, L1, L2, dim)
+                v = tf.get_variable('v', [units, 1], dtype=tf.float32)
 
-                rQ = tf.reduce_max(A, axis=2)
-                rC = tf.reduce_max(A, axis=1)
+                # convolution
+                info = tf.layers.conv2d(A, units, 5, activation=tf.nn.relu)  # (B, NL1, NL2, units)
+                score = tf.keras.backend.dot(info, v)  # (B, NL1, NL2, 1)
 
-            with tf.variable_scope('attention'):
-                # concate
-                cate_f_ = tf.expand_dims(self.cate_f, axis=1)
-                Q_m = tf.concat([Q_sequence, rQ, tf.tile(cate_f_, [1, self.Q_maxlen, 1])], axis=-1)
-                C_m = tf.concat([C_sequence, rC, tf.tile(cate_f_, [1, self.C_maxlen, 1])], axis=-1)
+                eroll_info = tf.reshape(score, [self.N, -1])
+                eroll_A = tf.reshape(A, [self.N, -1, units])
 
-                Q_m = Dropout(Q_m, keep_prob=self.dropout_keep_prob, is_train=self._is_train)
-                C_m = Dropout(C_m, keep_prob=self.dropout_keep_prob, is_train=self._is_train)
+                info_top_k, indices = tf.nn.top_k(eroll_info, k=10)  # (B, k)
+                A_top_k = tf.batch_gather(eroll_A, indices)
 
-                Q_m = tf.layers.dense(Q_m, units=300, activation=tf.tanh, name='fw1')
-                C_m = tf.layers.dense(C_m, units=300, activation=tf.tanh, name='fw1', reuse=True)
+                alpha = tf.expand_dims(tf.nn.softmax(info_top_k, axis=1), axis=-1)
+                res = tf.reduce_sum(alpha * A_top_k, axis=1)
 
-                Q_m = Dropout(Q_m, keep_prob=0.8, is_train=self._is_train)
-                C_m = Dropout(C_m, keep_prob=0.8, is_train=self._is_train)
-
-                Q_m = tf.layers.dense(Q_m, units=1, activation=tf.tanh, name='fw2')
-                C_m = tf.layers.dense(C_m, units=1, activation=tf.tanh, name='fw2', reuse=True)
-
-                Q_m -= (1 - tf.expand_dims(self.Q_mask, axis=-1)) * 1e30
-                C_m -= (1 - tf.expand_dims(self.C_mask, axis=-1)) * 1e30
-                Qalpha = tf.nn.softmax(Q_m, axis=1)
-                Calpha = tf.nn.softmax(C_m, axis=1)
-
-                Q_vec = tf.reduce_sum(Qalpha * rQ, axis=1)
-                C_vec = tf.reduce_sum(Calpha * rC, axis=1)
-
-            info = tf.concat([Q_vec, C_vec], axis=1)
+            info = res
             info = Dropout(info, keep_prob=self.dropout_keep_prob, is_train=self._is_train)
             median = tf.layers.dense(info, 300, activation=tf.tanh)
             output = tf.layers.dense(median, self.args.categories_num, activation=tf.identity)

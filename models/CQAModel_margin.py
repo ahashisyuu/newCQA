@@ -7,6 +7,7 @@ import keras.losses
 from utils import PRF, print_metrics, eval_reranker
 from tqdm import tqdm
 from data import BatchDatasets
+from models.CQAModel import TextCNN
 
 EPSILON = 1e-7
 
@@ -25,6 +26,7 @@ class CQAModel:
         # hyper parameters and neccesary info
         print(embedding_matrix.shape)
         self._is_train = tf.get_variable('is_train', shape=[], dtype=tf.bool, trainable=False)
+        self.is_training = True
         self.word_mat = tf.get_variable('word_mat',
                                         initializer=tf.constant(embedding_matrix, dtype=tf.float32),
                                         trainable=args.word_trainable)
@@ -42,7 +44,10 @@ class CQAModel:
         self.N = None
 
         # batch input
-        self.inputs = self.QText, self.Q_len, self.PosCText, self.PosC_len, self.NegCText, self.NegC_len, self.Qcate = self.create_input()
+        self.inputs = self.QText, self.Q_char, self.Q_len, \
+            self.PosCText, self.PosC_char, self.PosC_len, \
+            self.NegCText, self.NegC_char, self.NegC_len, \
+            self.Qcate = self.create_input()
 
         # preparing mask and length info
         self.Q_mask = tf.cast(tf.cast(self.QText, tf.bool), tf.float32)
@@ -62,8 +67,8 @@ class CQAModel:
 
         # computing loss
         with tf.variable_scope('loss'):
-            original_loss = tf.reduce_sum(self.args.margin - self.pos_score + self.neg_score)
-            self.loss = tf.cond(tf.less(0.0, original_loss), lambda: original_loss, lambda: tf.constant(0.0))
+            original_loss = tf.nn.relu(self.args.margin - self.pos_score + self.neg_score)
+            self.loss = tf.reduce_mean(original_loss)
             if self.args.l2_weight != 0:
                 for v in tf.trainable_variables():
                     self.loss += self.args.l2_weight * tf.nn.l2_loss(v)
@@ -72,8 +77,8 @@ class CQAModel:
         self.count()
 
         # getting ready for training
-        self.opt = tf.train.AdagradOptimizer(learning_rate=self._lr)
-        # self.opt = tf.train.AdamOptimizer(learning_rate=self._lr, epsilon=1e-6)
+        # self.opt = tf.train.AdagradOptimizer(learning_rate=self._lr)
+        self.opt = tf.train.AdamOptimizer(learning_rate=self._lr, epsilon=1e-6)
         grads = self.opt.compute_gradients(self.loss)
         gradients, variables = zip(*grads)
         capped_grads, _ = tf.clip_by_global_norm(gradients, clip_norm=5.0)
@@ -82,12 +87,20 @@ class CQAModel:
 
     def create_input(self):
         qTEXT = tf.placeholder(tf.int32, [None, None])
+        q_char = tf.placeholder(tf.int32, [None, None, None])
         q_len = tf.placeholder(tf.int32, [None])
+
         pos_cTEXT = tf.placeholder(tf.int32, [None, None])
+        pos_c_char = tf.placeholder(tf.int32, [None, None, None])
         pos_c_len = tf.placeholder(tf.int32, [None])
+
         neg_cTEXT = tf.placeholder(tf.int32, [None, None])
+        neg_c_char = tf.placeholder(tf.int32, [None, None, None])
         neg_c_len = tf.placeholder(tf.int32, [None])
-        inputs = [qTEXT, q_len, pos_cTEXT, pos_c_len, neg_cTEXT, neg_c_len]
+
+        inputs = [qTEXT, q_char, q_len,
+                  pos_cTEXT, pos_c_char, pos_c_len,
+                  neg_cTEXT, neg_c_char, neg_c_len]
 
         cate = tf.placeholder(tf.int32, [None])
 
@@ -99,6 +112,34 @@ class CQAModel:
             QS = tf.nn.embedding_lookup(self.word_mat, self.QText)
             pos_CT = tf.nn.embedding_lookup(self.word_mat, self.PosCText)
             neg_CT = tf.nn.embedding_lookup(self.word_mat, self.NegCText)
+
+            if self.args.use_char_level:
+                self.char_embedding = tf.get_variable('char_mat', [self.char_num + 1, self.args.char_dim],
+                                                      trainable=self.args.char_trainable)
+                q_char = tf.reshape(self.Q_char, [-1, tf.shape(self.Q_char)[2]])
+                pos_c_char = tf.reshape(self.C_char, [-1, tf.shape(self.C_char)[2]])
+                neg_c_char = tf.reshape(self.C_char, [-1, tf.shape(self.C_char)[2]])
+
+                q_cmask = tf.cast(tf.cast(q_char, tf.bool), tf.float32)
+                pos_c_cmask = tf.cast(tf.cast(pos_c_char, tf.bool), tf.float32)
+                neg_c_cmask = tf.cast(tf.cast(neg_c_char, tf.bool), tf.float32)
+
+                q_char_emb = tf.nn.embedding_lookup(self.char_embedding, q_char)
+                pos_c_char_emb = tf.nn.embedding_lookup(self.char_embedding, pos_c_char)
+                neg_c_char_emb = tf.nn.embedding_lookup(self.char_embedding, neg_c_char)
+
+                text_cnn = TextCNN(self.args.char_dim, [1, 2, 3, 4, 5, 6], 50)
+                q_char_emb = text_cnn(q_char_emb, q_cmask)
+                pos_c_char_emb = text_cnn(pos_c_char_emb, pos_c_cmask)
+                neg_c_char_emb = text_cnn(neg_c_char_emb, neg_c_cmask)
+
+                q_char_emb = tf.reshape(q_char_emb, [self.N, -1, 300])
+                pos_c_char_emb = tf.reshape(pos_c_char_emb, [self.N, -1, 300])
+                neg_c_char_emb = tf.reshape(neg_c_char_emb, [self.N, -1, 300])
+
+                QS = tf.concat([QS, q_char_emb], -1)
+                pos_CT = tf.concat([pos_CT, pos_c_char_emb], -1)
+                neg_CT = tf.concat([neg_CT, neg_c_char_emb], -1)
 
             embedded = [QS, pos_CT, neg_CT]
 
@@ -160,13 +201,21 @@ class CQAModel:
         rel = []
         with tqdm(total=steps_num, ncols=70) as tbar:
             for batch_eva_data in eva_data:
-                batch_qText, batch_q_len, batch_cText, batch_c_len, batch_cate, batch_rel = batch_eva_data
+                batch_qText, batch_q_char, batch_q_len, \
+                    batch_cText, batch_c_char, batch_c_len, \
+                    batch_cate, batch_rel = batch_eva_data
                 feed_dict = {self.QText: batch_qText,
+                             self.Q_char: batch_q_char,
                              self.Q_len: batch_q_len,
+
                              self.PosCText: batch_cText,
+                             self.PosC_char: batch_c_char,
                              self.PosC_len: batch_c_len,
+
                              self.NegCText: batch_cText,
+                             self.NegC_char: batch_c_char,
                              self.NegC_len: batch_c_len,
+
                              self.Qcate: batch_cate}
                 batch_scores = self.sess.run(self.pos_score, feed_dict=feed_dict)
 

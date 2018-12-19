@@ -1,6 +1,6 @@
 class Config:
     lr = 1e-3
-    dropout = 0.1
+    dropout = 0.2
 
     q_max_len = 110
     c_max_len = 150
@@ -22,7 +22,7 @@ class Config:
     word_trainable = False
     char_trainable = True
     need_shuffle = True
-    use_char_level = True
+    use_char_level = False
     load_best_model = True
 
     model_dir = './models/CQAModel'

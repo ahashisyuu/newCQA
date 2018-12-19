@@ -81,7 +81,7 @@ class Baseline3_2(CQAModel):
 
                 info = tf.concat([Q_vec_mean, C_vec_mean,Q_vec_max,C_vec_max], axis=-1)
                 median = tf.layers.dense(info, 300, activation=tf.tanh)
-                output = tf.layers.dense(median, 2, activation=tf.identity)
+                output = tf.layers.dense(median, self.args.categories_num, activation=tf.identity)
 
             return output
 

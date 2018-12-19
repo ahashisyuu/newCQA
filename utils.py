@@ -80,7 +80,7 @@ def print_metrics(metrics, metrics_type, save_dir=None):
              'P ={0:>6.2f}%, R ={1:>6.2f}%, F ={2:>6.2f}%'.format(*macro_prf),
              '--------------------------------------------------\n']
 
-    [print(line) for line in lines]
+    # [print(line) for line in lines]
 
     if save_dir is not None:
         with open(os.path.join(save_dir, "{}_logs.log".format(metrics_type)), 'a') as fw:

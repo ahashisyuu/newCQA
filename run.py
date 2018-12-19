@@ -12,7 +12,7 @@ config = Config()
 parser = argparse.ArgumentParser()
 
 parser.add_argument('--mode', type=str, default='train')
-parser.add_argument('--model', type=str, default='Baseline3')
+parser.add_argument('--model', type=str, default='Baseline2')
 parser.add_argument('--train_list', type=list, default=['15train', '15dev', '15test', '16train1', '16train2', '16dev'])
 parser.add_argument('--dev_list', type=list, default=['16test'])
 parser.add_argument('--test_list', type=list, default=['16test'])
@@ -30,6 +30,7 @@ parser.add_argument('--margin', type=float, default=config.margin)
 
 parser.add_argument('--patience', type=int, default=config.patience)
 parser.add_argument('--k_fold', type=int, default=config.k_fold)
+parser.add_argument('--categories_num', type=int, default=config.categories_num)
 parser.add_argument('--period', type=int, default=config.period)
 
 parser.add_argument('--wipe_num', type=int, default=config.wipe_num)
@@ -64,7 +65,7 @@ def run(args):
 
         all_data = BatchDatasets(args.q_max_len, args.c_max_len, args.char_max_len, args.word_type,
                                  need_shuffle=args.need_shuffle, use_char_level=args.use_char_level,
-                                 batch_size=args.batch_size, k_fold=args.k_fold,
+                                 batch_size=args.batch_size, k_fold=args.k_fold, categories_num=args.categories_num,
                                  train_samples=train_samples, dev_samples=dev_samples, test_samples=test_samples,
                                  triplets_file='./data/data_triplets.pkl')
 

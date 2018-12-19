@@ -176,46 +176,13 @@ def embedding_postprocessor(input_tensor,
                             token_type_vocab_size=16,
                             token_type_embedding_name="token_type_embeddings",
                             use_position_embeddings=True,
-                            position_embedding_name="position_embeddings",
+                            full_position_embeddings=None,
                             initializer_range=0.02,
-                            max_position_embeddings=512,
                             dropout_prob=0.1):
-  """Performs various post-processing on a word embedding tensor.
-
-  Args:
-    input_tensor: float Tensor of shape [batch_size, seq_length,
-      embedding_size].
-    use_token_type: bool. Whether to add embeddings for `token_type_ids`.
-    token_type_ids: (optional) int32 Tensor of shape [batch_size, seq_length].
-      Must be specified if `use_token_type` is True.
-    token_type_vocab_size: int. The vocabulary size of `token_type_ids`.
-    token_type_embedding_name: string. The name of the embedding table variable
-      for token type ids.
-    use_position_embeddings: bool. Whether to add position embeddings for the
-      position of each token in the sequence.
-    position_embedding_name: string. The name of the embedding table variable
-      for positional embeddings.
-    initializer_range: float. Range of the weight initialization.
-    max_position_embeddings: int. Maximum sequence length that might ever be
-      used with this model. This can be longer than the sequence length of
-      input_tensor, but cannot be shorter.
-    dropout_prob: float. Dropout probability applied to the final output tensor.
-
-  Returns:
-    float tensor with same shape as `input_tensor`.
-
-  Raises:
-    ValueError: One of the tensor shapes or input values is invalid.
-  """
   input_shape = get_shape_list(input_tensor, expected_rank=3)
   batch_size = input_shape[0]
   seq_length = input_shape[1]
   width = input_shape[2]
-
-  if seq_length > max_position_embeddings:
-    raise ValueError("The seq length (%d) cannot be greater than "
-                     "`max_position_embeddings` (%d)" %
-                     (seq_length, max_position_embeddings))
 
   output = input_tensor
 
@@ -237,10 +204,6 @@ def embedding_postprocessor(input_tensor,
     output += token_type_embeddings
 
   if use_position_embeddings:
-    full_position_embeddings = tf.get_variable(
-        name=position_embedding_name,
-        shape=[max_position_embeddings, width],
-        initializer=create_initializer(initializer_range))
     # Since the position embedding table is a learned variable, we create it
     # using a (long) sequence length `max_position_embeddings`. The actual
     # sequence length might be shorter than this, for faster training of
@@ -250,11 +213,8 @@ def embedding_postprocessor(input_tensor,
     # for position [0, 1, 2, ..., max_position_embeddings-1], and the current
     # sequence has positions [0, 1, 2, ... seq_length-1], so we can just
     # perform a slice.
-    if seq_length < max_position_embeddings:
-      position_embeddings = tf.slice(full_position_embeddings, [0, 0],
-                                     [seq_length, -1])
-    else:
-      position_embeddings = full_position_embeddings
+    position_embeddings = tf.slice(full_position_embeddings, [0, 0],
+                                   [seq_length, -1])
 
     num_dims = len(output.shape.as_list())
 
@@ -320,7 +280,8 @@ def attention_layer(from_tensor,
                     do_return_2d_tensor=False,
                     batch_size=None,
                     from_seq_length=None,
-                    to_seq_length=None):
+                    to_seq_length=None,
+                    reuse=None):
   """Performs multi-headed attention from `from_tensor` to `to_tensor`.
 
   This is an implementation of multi-headed attention based on "Attention
@@ -419,14 +380,15 @@ def attention_layer(from_tensor,
       num_attention_heads * size_per_head,
       activation=query_act,
       name="query",
-      kernel_initializer=create_initializer(initializer_range))
+      kernel_initializer=create_initializer(initializer_range),
+      reuse=reuse)
 
   # `key_layer` = [B*T, N*H]
   key_layer = tf.layers.dense(
       to_tensor_2d,
       num_attention_heads * size_per_head,
       activation=key_act,
-      name="key",
+      name="key", reuse=reuse,
       kernel_initializer=create_initializer(initializer_range))
 
   # `value_layer` = [B*T, N*H]
@@ -434,7 +396,7 @@ def attention_layer(from_tensor,
       to_tensor_2d,
       num_attention_heads * size_per_head,
       activation=value_act,
-      name="value",
+      name="value", reuse=reuse,
       kernel_initializer=create_initializer(initializer_range))
 
   # `query_layer` = [B, N, F, H]

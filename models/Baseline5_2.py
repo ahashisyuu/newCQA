@@ -72,7 +72,7 @@ def get_timing_signal_1d(length, channels, min_timescale=1.0, max_timescale=1.0e
     return signal
 
 
-class Baseline5(CQAModel):
+class Baseline5_2(CQAModel):
     def build_model(self):
         with tf.variable_scope('ai_cnn', initializer=tf.glorot_uniform_initializer()):
             units = 300
@@ -102,9 +102,8 @@ class Baseline5(CQAModel):
 
             with tf.variable_scope('attention'):
                 # concate
-                cate_f_ = tf.expand_dims(self.cate_f, axis=1)
-                Q_m = tf.concat([Q_sequence, rQ, tf.tile(cate_f_, [1, self.Q_maxlen, 1])], axis=-1)
-                C_m = tf.concat([C_sequence, rC, tf.tile(cate_f_, [1, self.C_maxlen, 1])], axis=-1)
+                Q_m = tf.concat([Q_sequence, rQ], axis=-1)
+                C_m = tf.concat([C_sequence, rC], axis=-1)
 
                 Q_m = Dropout(Q_m, keep_prob=self.dropout_keep_prob, is_train=self._is_train)
                 C_m = Dropout(C_m, keep_prob=self.dropout_keep_prob, is_train=self._is_train)

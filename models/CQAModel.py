@@ -86,6 +86,7 @@ class CQAModel:
         # hyper parameters and neccesary info
         print(embedding_matrix.shape)
         self._is_train = tf.get_variable('is_train', shape=[], dtype=tf.bool, trainable=False)
+        self.is_training = True
         self.word_mat = tf.get_variable('word_mat',
                                         initializer=tf.constant(embedding_matrix, dtype=tf.float32),
                                         trainable=args.word_trainable)
@@ -122,7 +123,7 @@ class CQAModel:
         # computing loss
         with tf.variable_scope('predict'):
             self.predict_prob = tf.nn.softmax(self.output)
-            labels = tf.one_hot(self.Rel, 2, dtype=tf.float32)
+            labels = tf.one_hot(self.Rel, self.args.categories_num, dtype=tf.float32)
             losses = tf.nn.softmax_cross_entropy_with_logits(labels=labels, logits=self.output)
             self.loss = tf.reduce_mean(losses)
             if self.args.l2_weight != 0:
@@ -176,8 +177,16 @@ class CQAModel:
                 q_char_emb = text_cnn(q_char_emb, q_cmask)
                 c_char_emb = text_cnn(c_char_emb, c_cmask)
 
-                QS = tf.concat([QS, tf.reshape(q_char_emb, [self.N, -1, 300])], -1)
-                CT = tf.concat([CT, tf.reshape(c_char_emb, [self.N, -1, 300])], -1)
+                q_char_emb = tf.reshape(q_char_emb, [self.N, -1, 300])
+                c_char_emb = tf.reshape(c_char_emb, [self.N, -1, 300])
+
+                QS = tf.concat([QS, q_char_emb], -1)
+                CT = tf.concat([CT, c_char_emb], -1)
+
+                # QS = QS + q_char_emb
+                # CT = CT + c_char_emb
+
+
 
             highway = MultiLayerHighway(300, 1, tf.nn.elu, self.dropout_keep_prob, self._is_train)
             QS = highway(QS)
@@ -273,7 +282,7 @@ class CQAModel:
         loss_summ = tf.Summary(value=[tf.Summary.Value(
             tag="{}/loss".format(eva_type), simple_value=metrics['loss']), ])
         macro_F_summ = tf.Summary(value=[tf.Summary.Value(
-            tag="{}/f1".format(eva_type), simple_value=metrics['macro_prf'][2]), ])
+            tag="{}/f1".format(eva_type), simple_value=metrics['each_prf'][2][0]), ])
         acc = tf.Summary(value=[tf.Summary.Value(
             tag="{}/acc".format(eva_type), simple_value=metrics['acc']), ])
         return metrics, [loss_summ, macro_F_summ, acc, MAP_summ, AvgRec_summ, MRR_summ]
@@ -310,6 +319,7 @@ class CQAModel:
 
             print('training model')
             self.is_train = True
+            self.is_training = True
             self.dropout = config.dropout
 
             with tqdm(total=train_steps, ncols=70) as tbar:
@@ -324,6 +334,7 @@ class CQAModel:
                         print('\n---------------------------------------')
                         print('\nevaluating model\n')
                         self.is_train = False
+                        self.is_training = False
                         self.dropout = 1.0
 
                         val_metrics, summ = self.evaluate(dev_data, dev_steps, 'dev', dev_id)
@@ -439,6 +450,7 @@ class CQAModel:
             # shape is an array of tf.Dimension
             shape = variable.get_shape()
             variable_parameters = 1
+            # print(shape, variable)
             for dim in shape:
                 variable_parameters *= dim.value
             total_parameters += variable_parameters

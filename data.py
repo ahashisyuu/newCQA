@@ -8,7 +8,7 @@ from keras.preprocessing.sequence import pad_sequences
 
 class BatchDatasets:
     def __init__(self,  q_max_len=None, c_max_len=None, char_max_len=16, word_type='lemma',
-                 need_shuffle=True, use_char_level=True, batch_size=64, k_fold=0,
+                 need_shuffle=True, use_char_level=True, batch_size=64, k_fold=0, categories_num=2,
                  train_samples: list=None, dev_samples: list=None, test_samples=None, triplets_file=None):
         self.train_samples = self.processing_sample(train_samples)  # merge
         self.dev_samples = self.processing_sample(dev_samples)
@@ -23,6 +23,7 @@ class BatchDatasets:
         self.train_samples_num = len(self.train_samples)
         self.dev_samples_num = len(self.dev_samples)
         self.k_fold = k_fold
+        self.categories_num = categories_num
         self.train_steps_num = 0
         self.dev_steps_num = 0
         self.test_steps_num = 0
@@ -59,13 +60,15 @@ class BatchDatasets:
         self.qCate_test = None
         self.rel_test = None
 
+        self.label_name = 'rel_index' if self.categories_num == 3 else 'Rrel_index'
+
         if train_samples is not None and dev_samples is not None:
             if k_fold > 1:  # merge train data and dev data
                 self.train_samples = pd.concat([self.train_samples, self.dev_samples], axis=0, ignore_index=True)
                 skf = StratifiedKFold(n_splits=k_fold, random_state=0)
                 self.index_list = [index
                                    for index in skf.split(self.train_samples['qTEXT_token_index'].values,
-                                                          self.train_samples['rel_index'].values)]
+                                                          self.train_samples[self.label_name].values)]
 
         # load triplets training samples
         with open(os.path.join(triplets_file), 'rb') as fr:
@@ -135,12 +138,17 @@ class BatchDatasets:
         for batch_start in np.arange(0, self.train_steps_num, batch_size):
             batch_data = samples.iloc[batch_start:batch_start+batch_size]
             q_cate = batch_data['q_cate'].values
-            qTEXT_index = batch_data['qTEXT_index'].values
+            q_index = batch_data['q_{}'.format(self.word_type)].values
+            q_char_index = batch_data['q_{}_char'.format(self.word_type)].values
             q_len = batch_data['q_len'].values
-            c_pos_index = batch_data['c_pos_index'].values
-            c_pos_len = batch_data['c_pos_len'].values
-            c_neg_index = batch_data['c_neg_index'].values
-            c_neg_len = batch_data['c_neg_len'].values
+
+            c_pos_index = batch_data['a_p_{}'.format(self.word_type)].values
+            c_pos_char_index = batch_data['a_p_{}_char'.format(self.word_type)].values
+            c_pos_len = batch_data['a_p_len'].values
+
+            c_neg_index = batch_data['a_n_{}'.format(self.word_type)].values
+            c_neg_char_index = batch_data['a_n_{}_char'.format(self.word_type)].values
+            c_neg_len = batch_data['a_n_len'].values
 
             q_max_len = min(max(q_len), self.q_max_len)
             c_pos_max_len = min(max(c_pos_len), self.c_max_len)
@@ -150,19 +158,27 @@ class BatchDatasets:
             c_pos_len[c_pos_len > c_pos_max_len] = c_pos_max_len
             c_neg_len[c_neg_len > c_neg_max_len] = c_neg_max_len
 
-            yield [self.pad_sentence(qTEXT_index, q_max_len), q_len,
-                   self.pad_sentence(c_pos_index, c_pos_max_len), c_pos_len,
-                   self.pad_sentence(c_neg_index, c_neg_max_len), c_neg_len, q_cate]
+            yield [self.pad_sentence(q_index, q_max_len),
+                   self.pad_sentence(q_char_index, q_max_len), q_len,
+
+                   self.pad_sentence(c_pos_index, c_pos_max_len),
+                   self.pad_sentence(c_pos_char_index, c_pos_max_len), c_pos_len,
+
+                   self.pad_sentence(c_neg_index, c_neg_max_len),
+                   self.pad_sentence(c_neg_char_index, c_neg_max_len), c_neg_len,
+                   q_cate]
 
     def batch_train_triplets(self, batch_size=None, train_files=None):
         self.q_id_dev = self.dev_samples['q_id'].values
         self.c_id_dev = self.dev_samples['c_id'].values
-        self.qTEXT_dev = self.dev_samples['qTEXT_lemma_index'].values.tolist()
+        self.qTEXT_dev = self.dev_samples['qTEXT_{}_index'.format(self.word_type)].values.tolist()
         self.q_len_dev = self.dev_samples['qTEXT_len'].values
-        self.cTEXT_dev = self.dev_samples['cTEXT_lemma_index'].values.tolist()
+        self.cTEXT_dev = self.dev_samples['cTEXT_{}_index'.format(self.word_type)].values.tolist()
         self.c_len_dev = self.dev_samples['cTEXT_len'].values
+        self.q_char_dev = self.dev_samples['qTEXT_{}_char_index'.format(self.word_type)].values
+        self.c_char_dev = self.dev_samples['cTEXT_{}_char_index'.format(self.word_type)].values
         self.qCate_dev = self.dev_samples['cate_index'].values
-        self.rel_dev = self.dev_samples['Rrel_index'].values
+        self.rel_dev = self.dev_samples[self.label_name].values
 
         batch_size = batch_size or self.batch_size
         return self.gen_train_triplets(train_files, batch_size)
@@ -179,7 +195,7 @@ class BatchDatasets:
             q_char = self.train_samples['qTEXT_{}_char_index'.format(self.word_type)].values
             c_char = self.train_samples['cTEXT_{}_char_index'.format(self.word_type)].values
             qCate = self.train_samples['cate_index'].values
-            Rrel = self.train_samples['Rrel_index'].values
+            Rrel = self.train_samples[self.label_name].values
 
             self.qTEXT_train = qTEXT[train_index].tolist()
             self.q_len_train = q_len[train_index]
@@ -212,7 +228,7 @@ class BatchDatasets:
             self.q_char_train = self.train_samples['qTEXT_{}_char_index'.format(self.word_type)].values
             self.c_char_train = self.train_samples['cTEXT_{}_char_index'.format(self.word_type)].values
             self.qCate_train = self.train_samples['cate_index'].values
-            self.rel_train = self.train_samples['Rrel_index'].values
+            self.rel_train = self.train_samples[self.label_name].values
 
             self.q_id_dev = self.dev_samples['q_id'].values
             self.c_id_dev = self.dev_samples['c_id'].values
@@ -223,7 +239,7 @@ class BatchDatasets:
             self.q_char_dev = self.dev_samples['qTEXT_{}_char_index'.format(self.word_type)].values
             self.c_char_dev = self.dev_samples['cTEXT_{}_char_index'.format(self.word_type)].values
             self.qCate_dev = self.dev_samples['cate_index'].values
-            self.rel_dev = self.dev_samples['Rrel_index'].values
+            self.rel_dev = self.dev_samples[self.label_name].values
 
         self.train_steps_num = self.rel_train.shape[0]
         self.cweight = self.compute_class_weight(self.rel_train)
@@ -253,7 +269,7 @@ class BatchDatasets:
         self.q_char_test = self.test_samples['qTEXT_{}_char_index'.format(self.word_type)].values
         self.c_char_test = self.test_samples['cTEXT_{}_char_index'.format(self.word_type)].values
         self.qCate_test = self.test_samples['cate_index'].values
-        self.rel_test = self.test_samples['Rrel_index'].values
+        self.rel_test = self.test_samples[self.label_name].values
 
         if test_batch_size is None:
             test_batch_size = self.batch_size

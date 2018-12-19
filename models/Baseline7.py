@@ -87,40 +87,30 @@ def projection(attention_output, hidden_size, initializer_range, hidden_dropout_
     return attention_output
 
 
-class Baseline6(CQAModel):
+class Baseline7(CQAModel):
     def build_model(self):
-        with tf.variable_scope('baseline6', initializer=tf.glorot_uniform_initializer()):
-            units = 256
+        with tf.variable_scope('baseline7', initializer=tf.glorot_uniform_initializer()):
+            units = 300
             Q, C = self.QS, self.CT
             Q_len, C_len = self.Q_len, self.C_len
-
-            with tf.variable_scope('encode'):
-                rnn1 = BiGRU(num_layers=1, num_units=units,
-                             batch_size=tf.shape(self.QS)[0], input_size=self.CT.get_shape()[-1],
-                             keep_prob=self.dropout_keep_prob, is_train=self._is_train)
-                Q_sequence = rnn1(Q, seq_len=Q_len)
-                C_sequence = rnn1(C, seq_len=C_len)
 
             with tf.variable_scope('position'):
                 q_attention_mask = create_attention_mask_from_input_mask(self.QText, self.Q_mask)
                 c_attention_mask = create_attention_mask_from_input_mask(self.CText, self.C_mask)
-                hidden_size = 512
+                hidden_size = 300
                 num_hidden_layers = 1
-                num_attention_heads = 8
-                intermediate_size = 3072
-                intermediate_act_fn = gelu
+                num_attention_heads = 6
                 hidden_dropout = 0.1 if self.is_training else 0.0
                 attention_dropout = 0.1 if self.is_training else 0.0
                 initializer_range = 0.02
 
                 full_position_embeddings = tf.get_variable(name='position',
-                                                           shape=[200, 2*units],
-                                                           initializer=create_initializer(initializer_range),
-                                                           trainable=False)
-                Q_sequence = embedding_postprocessor(Q_sequence,
+                                                           shape=[200, units],
+                                                           initializer=create_initializer(initializer_range))
+                Q_sequence = embedding_postprocessor(Q,
                                                      full_position_embeddings=full_position_embeddings,
                                                      dropout_prob=hidden_dropout)
-                C_sequence = embedding_postprocessor(C_sequence,
+                C_sequence = embedding_postprocessor(C,
                                                      full_position_embeddings=full_position_embeddings,
                                                      dropout_prob=hidden_dropout)
 
@@ -131,7 +121,7 @@ class Baseline6(CQAModel):
                         "heads (%d)" % (hidden_size, num_attention_heads))
 
                 attention_head_size = int(hidden_size / num_attention_heads)
-                input_width = 2 * units
+                input_width = units
 
                 if input_width != hidden_size:
                     raise ValueError("The width of the input tensor (%d) != hidden size (%d)" %

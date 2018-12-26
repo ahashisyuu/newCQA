@@ -12,7 +12,7 @@ config = Config()
 parser = argparse.ArgumentParser()
 
 parser.add_argument('--mode', type=str, default='train')
-parser.add_argument('--model', type=str, default='Baseline2')
+parser.add_argument('--model', type=str, default='Baseline3_5')
 parser.add_argument('--train_list', type=list, default=['15train', '15dev', '15test', '16train1', '16train2', '16dev'])
 parser.add_argument('--dev_list', type=list, default=['16test'])
 parser.add_argument('--test_list', type=list, default=['16test'])
@@ -23,6 +23,7 @@ parser.add_argument('--q_max_len', type=int, default=config.q_max_len)
 parser.add_argument('--c_max_len', type=int, default=config.c_max_len)
 parser.add_argument('--char_max_len', type=int, default=config.char_max_len)
 parser.add_argument('--epochs', type=int, default=config.epochs)
+parser.add_argument('--max_steps', type=int, default=config.max_steps)
 parser.add_argument('--batch_size', type=int, default=config.batch_size)
 parser.add_argument('--char_dim', type=int, default=config.char_dim)
 parser.add_argument('--l2_weight', type=int, default=config.l2_weight)
@@ -37,6 +38,7 @@ parser.add_argument('--wipe_num', type=int, default=config.wipe_num)
 
 parser.add_argument('--word_trainable', type=bool, default=config.word_trainable)
 parser.add_argument('--char_trainable', type=bool, default=config.char_trainable)
+parser.add_argument('--cate_trainable', type=bool, default=config.cate_trainable)
 parser.add_argument('--need_shuffle', type=bool, default=config.need_shuffle)
 parser.add_argument('--use_char_level', type=bool, default=config.use_char_level)
 parser.add_argument('--load_best_model', type=bool, default=config.load_best_model)
@@ -67,7 +69,7 @@ def run(args):
                                  need_shuffle=args.need_shuffle, use_char_level=args.use_char_level,
                                  batch_size=args.batch_size, k_fold=args.k_fold, categories_num=args.categories_num,
                                  train_samples=train_samples, dev_samples=dev_samples, test_samples=test_samples,
-                                 triplets_file='./data/data_triplets.pkl')
+                                 triplets_file='./data/data_triplets.pkl', args=args)
 
         model = model_dict[args.model](embedding_matrix=embedding_matrix, args=args, char_num=len(char2index))
 

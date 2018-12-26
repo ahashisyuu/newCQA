@@ -5,11 +5,11 @@ from layers.BiGRU import NativeGRU as BiGRU
 import keras.losses
 
 
-class Baseline4(CQAModel):
+class Baseline4_margin(CQAModel):
     def MLP(self, Q_vec, C_vec, reuse=None):
         info = tf.concat([Q_vec, C_vec, Q_vec * C_vec], axis=1)
         median = tf.layers.dense(info, 300, activation=tf.tanh, name='median', reuse=reuse)
-        output = tf.layers.dense(median, self.args.categories_num, activation=tf.identity, name='output', reuse=reuse)
+        output = tf.layers.dense(median, 1, activation=tf.sigmoid, name='output', reuse=reuse)
         return output
 
     def build_model(self):
@@ -20,10 +20,10 @@ class Baseline4(CQAModel):
 
             with tf.variable_scope('encode'):
                 rnn1 = BiGRU(num_layers=1, num_units=units,
-                             batch_size=tf.shape(self.QS)[0], input_size=self.CT.get_shape()[-1],
+                             batch_size=tf.shape(self.QS)[0], input_size=self.QS.get_shape()[-1],
                              keep_prob=self.dropout_keep_prob, is_train=self._is_train, scope='q')
                 rnn2 = BiGRU(num_layers=1, num_units=units,
-                             batch_size=tf.shape(self.QS)[0], input_size=self.CT.get_shape()[-1],
+                             batch_size=tf.shape(self.QS)[0], input_size=self.QS.get_shape()[-1],
                              keep_prob=self.dropout_keep_prob, is_train=self._is_train, scope='c')
                 Q_sequence = rnn1(Q, seq_len=Q_len, return_type=1)
 
@@ -57,8 +57,11 @@ class Baseline4(CQAModel):
             C_vec_pos = tf.reduce_mean(C_pos, axis=1)
             C_vec_neg = tf.reduce_mean(C_neg, axis=1)
 
-            pos_output = self.MLP(Q_vec_pos, C_vec_pos)
-            neg_output = self.MLP(Q_vec_neg, C_vec_neg, reuse=True)
+            # pos_output = self.MLP(Q_vec_pos, C_vec_pos)
+            # neg_output = self.MLP(Q_vec_neg, C_vec_neg, reuse=True)
+
+            pos_output = tf.reduce_sum(tf.nn.l2_normalize(Q_vec_pos, 1) * tf.nn.l2_normalize(C_vec_pos, 1), 1)
+            neg_output = tf.reduce_sum(tf.nn.l2_normalize(Q_vec_neg, 1) * tf.nn.l2_normalize(C_vec_neg, 1), 1)
 
             return pos_output, neg_output
 

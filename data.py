@@ -9,10 +9,11 @@ from keras.preprocessing.sequence import pad_sequences
 class BatchDatasets:
     def __init__(self,  q_max_len=None, c_max_len=None, char_max_len=16, word_type='lemma',
                  need_shuffle=True, use_char_level=True, batch_size=64, k_fold=0, categories_num=2,
-                 train_samples: list=None, dev_samples: list=None, test_samples=None, triplets_file=None):
+                 train_samples: list=None, dev_samples: list=None, test_samples=None, triplets_file=None, args=None):
         self.train_samples = self.processing_sample(train_samples)  # merge
         self.dev_samples = self.processing_sample(dev_samples)
         self.test_samples = self.processing_sample(test_samples)
+        self.args = args
         self.q_max_len = q_max_len
         self.c_max_len = c_max_len
         self.char_max_len = char_max_len
@@ -91,9 +92,11 @@ class BatchDatasets:
         return pad_sequences(e, padding='post', truncating='post', maxlen=maxlen)
 
     def padding(self, qtext, q_len, ctext, c_len, q_char, c_char):
-        q_max_len = min(max(q_len), self.q_max_len)
+        # q_max_len = min(max(q_len), self.q_max_len)
+        q_max_len = self.q_max_len
         q_len[q_len > q_max_len] = q_max_len
-        c_max_len = min(max(c_len), self.c_max_len)
+        # c_max_len = min(max(c_len), self.c_max_len)
+        c_max_len = self.c_max_len
         c_len[c_len > c_max_len] = c_max_len
         cur_max_len = [q_max_len, c_max_len]
         pad_res = [self.pad_sentence(e, maxlen=l) for e, l in zip([qtext, ctext], cur_max_len)]
@@ -102,8 +105,11 @@ class BatchDatasets:
 
     def mini_batch_data(self, qText, q_len, cText, c_len, q_char, c_char, cate, rel, batch_size):
         data_size = rel.shape[0]
-        for batch_start in np.arange(0, data_size, batch_size):
-            sl = slice(batch_start, batch_start + batch_size)
+        batch_start = 0
+        # for batch_start in np.arange(0, data_size, batch_size):
+        for step in range(self.args.max_steps):
+            batch_end = batch_start + batch_size
+            sl = slice(batch_start, min(batch_end, data_size))
             batch_qText = qText[sl]
             batch_q_len = q_len[sl]
             batch_cText = cText[sl]
@@ -112,6 +118,18 @@ class BatchDatasets:
             batch_c_char = c_char[sl]
             batch_cate = cate[sl]
             batch_rel = rel[sl]
+
+            batch_start = batch_end % data_size
+            if batch_end > data_size:
+                sl = slice(0, batch_start)
+                batch_qText = batch_qText + qText[sl]
+                batch_q_len = np.concatenate([batch_q_len, q_len[sl]], 0)
+                batch_cText = batch_cText + cText[sl]
+                batch_c_len = np.concatenate([batch_c_len, c_len[sl]], 0)
+                batch_q_char = np.concatenate([batch_q_char, q_char[sl]], 0)
+                batch_c_char = np.concatenate([batch_c_char, c_char[sl]], 0)
+                batch_cate = np.concatenate([batch_cate, cate[sl]], 0)
+                batch_rel = np.concatenate([batch_rel, rel[sl]], 0)
 
             yield self.padding(batch_qText, batch_q_len, batch_cText, batch_c_len, batch_q_char, batch_c_char) + [batch_cate, batch_rel]
 

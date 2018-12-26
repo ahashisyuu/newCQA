@@ -100,8 +100,11 @@ class CQAModel:
                                         initializer=tf.constant([1. for _ in range(2)]),
                                         trainable=False)
         self.args = args
+        self.batch_size = args.batch_size
+        self.Q_maxlen = args.q_max_len
+        self.C_maxlen = args.c_max_len
+        self.char_max_len = args.char_max_len
         self.char_num = char_num
-        self.N = None
 
         # batch input
         self.inputs = self.QText, self.Q_len, self.CText, self.C_len, self.Q_char, self.C_char, self.Qcate, self.Rel = self.create_input()
@@ -109,10 +112,10 @@ class CQAModel:
         # preparing mask and length info
         self.Q_mask = tf.cast(tf.cast(self.QText, tf.bool), tf.float32)
         self.C_mask = tf.cast(tf.cast(self.CText, tf.bool), tf.float32)
-        self.Q_maxlen = tf.reduce_max(self.Q_len)
-        self.C_maxlen = tf.reduce_max(self.C_len)
+        # self.Q_maxlen = tf.reduce_max(self.Q_len)
+        # self.C_maxlen = tf.reduce_max(self.C_len)
 
-        self.N = tf.shape(self.Q_mask)[0]
+        # self.N = tf.shape(self.Q_mask)[0]
 
         # embedding word vector and char vector
         self.QS, self.CT, self.cate_f = self.embedding()
@@ -143,16 +146,16 @@ class CQAModel:
                                                  global_step=self._global_step)
 
     def create_input(self):
-        qTEXT = tf.placeholder(tf.int32, [None, None])
-        q_len = tf.placeholder(tf.int32, [None])
-        cTEXT = tf.placeholder(tf.int32, [None, None])
-        c_len = tf.placeholder(tf.int32, [None])
-        q_char = tf.placeholder(tf.int32, [None, None, None])
-        c_char = tf.placeholder(tf.int32, [None, None, None])
+        qTEXT = tf.placeholder(tf.int32, [self.batch_size, self.Q_maxlen])
+        q_len = tf.placeholder(tf.int32, [self.batch_size])
+        cTEXT = tf.placeholder(tf.int32, [self.batch_size, self.C_maxlen])
+        c_len = tf.placeholder(tf.int32, [self.batch_size])
+        q_char = tf.placeholder(tf.int32, [self.batch_size, self.Q_maxlen, self.char_max_len])
+        c_char = tf.placeholder(tf.int32, [self.batch_size, self.C_maxlen, self.char_max_len])
         inputs = [qTEXT, q_len, cTEXT, c_len, q_char, c_char]
 
-        cate = tf.placeholder(tf.int32, [None])
-        rel = tf.placeholder(tf.int32, [None])
+        cate = tf.placeholder(tf.int32, [self.batch_size])
+        rel = tf.placeholder(tf.int32, [self.batch_size])
 
         return inputs + [cate, rel]
 
@@ -177,8 +180,8 @@ class CQAModel:
                 q_char_emb = text_cnn(q_char_emb, q_cmask)
                 c_char_emb = text_cnn(c_char_emb, c_cmask)
 
-                q_char_emb = tf.reshape(q_char_emb, [self.N, -1, 300])
-                c_char_emb = tf.reshape(c_char_emb, [self.N, -1, 300])
+                q_char_emb = tf.reshape(q_char_emb, [self.batch_size, -1, 300])
+                c_char_emb = tf.reshape(c_char_emb, [self.batch_size, -1, 300])
 
                 QS = tf.concat([QS, q_char_emb], -1)
                 CT = tf.concat([CT, c_char_emb], -1)
@@ -186,14 +189,13 @@ class CQAModel:
                 # QS = QS + q_char_emb
                 # CT = CT + c_char_emb
 
-
-
             highway = MultiLayerHighway(300, 1, tf.nn.elu, self.dropout_keep_prob, self._is_train)
             QS = highway(QS)
             CT = highway(CT)
 
             category_mat = tf.get_variable('cate_mat', shape=[33, 25], dtype=tf.float32,
-                                           initializer=tf.glorot_uniform_initializer(), trainable=False)
+                                           initializer=tf.glorot_uniform_initializer(),
+                                           trainable=self.args.cate_trainable)
             cate_f = tf.nn.embedding_lookup(category_mat, self.Qcate)
 
             return [QS, CT, cate_f]
@@ -250,6 +252,7 @@ class CQAModel:
         predict = []
         loss = []
         with tqdm(total=steps_num, ncols=70) as tbar:
+            processed_samples = 0
             for batch_eva_data in eva_data:
                 batch_label = batch_eva_data[-1]
                 feed_dict = {inv: array for inv, array in zip(self.inputs, batch_eva_data)}
@@ -260,8 +263,12 @@ class CQAModel:
 
                 tbar.update(batch_label.shape[0])
 
-        label = np.concatenate(label, axis=0)
-        predict = np.concatenate(predict, axis=0)
+                processed_samples += self.batch_size
+                if processed_samples >= steps_num:
+                    break
+
+        label = np.concatenate(label, axis=0)[:steps_num]
+        predict = np.concatenate(predict, axis=0)[:steps_num]
         loss = sum(loss) / steps_num
         # predict = (predict > 0.5).astype('int32').reshape((-1,))
         metrics = PRF(label, predict.argmax(axis=-1))
@@ -295,25 +302,25 @@ class CQAModel:
         self.lr = config.lr
         self.dropout = config.dropout
 
-        for epoch in range(1, config.epochs + 1):
+        for _ in range(1):
             print('---------------------------------------')
-            print('EPOCH %d' % epoch)
+            # print('EPOCH %d' % epoch)
 
             print('---------------------------------------------')
             print('process train data')
-            train_data = [batch for batch in batch_dataset.batch_train_data(fold_num=fold_num)]
+            train_data = batch_dataset.batch_train_data(fold_num=fold_num)
             train_steps = batch_dataset.train_steps_num
             print('---------------------------------------------')
 
             print('class weight: ', batch_dataset.cweight)
             # self.cweight = [.9, 5., 1.1]
 
-            print('\n---------------------------------------------')
-            print('process dev data')
-            dev_data = [batch for batch in batch_dataset.batch_dev_data()]
-            dev_steps = batch_dataset.dev_steps_num
-            dev_id = batch_dataset.c_id_dev
-            print('----------------------------------------------\n')
+            # print('\n---------------------------------------------')
+            # print('process dev data')
+            # dev_data = batch_dataset.batch_dev_data()
+            # dev_steps = batch_dataset.dev_steps_num
+            # dev_id = batch_dataset.c_id_dev
+            # print('----------------------------------------------\n')
 
             print('the number of samples: %d\n' % train_steps)
 
@@ -337,8 +344,15 @@ class CQAModel:
                         self.is_training = False
                         self.dropout = 1.0
 
+                        print('\n---------------------------------------------')
+                        print('process dev data')
+                        dev_data = batch_dataset.batch_dev_data()
+                        dev_steps = batch_dataset.dev_steps_num
+                        dev_id = batch_dataset.c_id_dev
+                        print('----------------------------------------------\n')
+
                         val_metrics, summ = self.evaluate(dev_data, dev_steps, 'dev', dev_id)
-                        val_metrics['epoch'] = epoch
+                        val_metrics['step'] = self.global_step
 
                         if val_metrics['loss'] < loss_save:
                             loss_save = val_metrics['loss']
@@ -377,12 +391,14 @@ class CQAModel:
                             path = os.path.join(path, 'fold_%d' % fold_num)
                             if not os.path.exists(path):
                                 os.mkdir(path)
-                        filename = os.path.join(path, "epoch{0}_MAP{1:.4f}_Avg{2:.4f}_MRR{3:.4f}.model"
-                                                .format(epoch, val_metrics['MAP'], val_metrics['AvgRec'], val_metrics['MRR']))
+                        filename = os.path.join(path, "step{0}_MAP{1:.4f}_Avg{2:.4f}_MRR{3:.4f}.model"
+                                                .format(self.global_step, val_metrics['MAP'], val_metrics['AvgRec'], val_metrics['MRR']))
 
                         # print_metrics(metrics, 'train', path, categories_num=self.args.categories_num)
                         # print_metrics(val_metrics, 'val', path)
                         saver.save(self.sess, filename)
+                        if self.global_step >= self.args.max_steps:
+                            break
 
                     tbar.update(batch_dataset.batch_size)
 
@@ -390,7 +406,7 @@ class CQAModel:
 
     def train(self, batch_dataset: BatchDatasets, config):
         with self.sess:
-            saver = tf.train.Saver()
+            saver = tf.train.Saver(max_to_keep=10)
             self.sess.run(tf.global_variables_initializer())
 
             path = os.path.join(config.model_dir, self.__class__.__name__)

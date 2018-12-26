@@ -1,1 +1,1 @@
-    tensorboard --logdir models/CQAModel/Baseline5
+    tensorboard --logdir models/CQAModel_lemma_char_wF_cF/Baseline5

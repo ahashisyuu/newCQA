@@ -68,7 +68,7 @@ class CQAModel:
         # computing loss
         with tf.variable_scope('loss'):
             original_loss = tf.nn.relu(self.args.margin - self.pos_score + self.neg_score)
-            self.loss = tf.reduce_mean(original_loss)
+            self.loss = tf.reduce_sum(original_loss)
             if self.args.l2_weight != 0:
                 for v in tf.trainable_variables():
                     self.loss += self.args.l2_weight * tf.nn.l2_loss(v)
@@ -117,8 +117,8 @@ class CQAModel:
                 self.char_embedding = tf.get_variable('char_mat', [self.char_num + 1, self.args.char_dim],
                                                       trainable=self.args.char_trainable)
                 q_char = tf.reshape(self.Q_char, [-1, tf.shape(self.Q_char)[2]])
-                pos_c_char = tf.reshape(self.C_char, [-1, tf.shape(self.C_char)[2]])
-                neg_c_char = tf.reshape(self.C_char, [-1, tf.shape(self.C_char)[2]])
+                pos_c_char = tf.reshape(self.PosC_char, [-1, tf.shape(self.PosC_char)[2]])
+                neg_c_char = tf.reshape(self.NegC_char, [-1, tf.shape(self.NegC_char)[2]])
 
                 q_cmask = tf.cast(tf.cast(q_char, tf.bool), tf.float32)
                 pos_c_cmask = tf.cast(tf.cast(pos_c_char, tf.bool), tf.float32)
@@ -201,8 +201,8 @@ class CQAModel:
         rel = []
         with tqdm(total=steps_num, ncols=70) as tbar:
             for batch_eva_data in eva_data:
-                batch_qText, batch_q_char, batch_q_len, \
-                    batch_cText, batch_c_char, batch_c_len, \
+                batch_qText, batch_q_len, batch_cText, batch_c_len, \
+                    batch_q_char, batch_c_char, \
                     batch_cate, batch_rel = batch_eva_data
                 feed_dict = {self.QText: batch_qText,
                              self.Q_char: batch_q_char,
@@ -266,6 +266,7 @@ class CQAModel:
 
             print('training model')
             self.is_train = True
+            self.is_training = True
             self.dropout = config.dropout
 
             with tqdm(total=train_steps, ncols=70) as tbar:
@@ -280,6 +281,7 @@ class CQAModel:
                         print('\n---------------------------------------')
                         print('\nevaluating model\n')
                         self.is_train = False
+                        self.is_training = False
                         self.dropout = 0.
 
                         val_metrics, summ = self.evaluate(dev_data, dev_steps, 'dev', dev_id)

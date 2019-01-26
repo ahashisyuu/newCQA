@@ -1,3 +1,4 @@
+import itertools
 import math
 import os
 import random
@@ -7,9 +8,8 @@ import tensorflow as tf
 import keras.losses
 from utils import PRF, print_metrics, eval_reranker
 from tqdm import tqdm
-from data import BatchDatasets
+from dataTop10 import BatchDatasets
 from layers.BiGRU import Dropout
-from layers import optimization
 
 EPSILON = 1e-7
 
@@ -102,23 +102,18 @@ class CQAModel:
                                         trainable=False)
         self.args = args
         self.batch_size = None
-        # self.Q_maxlen = args.q_max_len
-        # self.C_maxlen = args.c_max_len
+        self.Q_maxlen = args.q_max_len
+        self.C_maxlen = args.c_max_len
         self.char_max_len = args.char_max_len
         self.char_num = char_num
 
         # batch input
-        self.inputs = self.QText, self.Q_len, self.CText, self.C_len, \
-            self.Q_char, self.C_char, self.Q_bert, self.C_bert, \
-            self.Qcate, self.Rel = self.create_input()
-        self.inputs = [a for a in self.inputs if a is not None]
+        self.inputs = self.QText, self.Q_len, self.CText, self.C_len, self.Q_char, self.C_char, self.Qcate, self.Rel = self.create_input()
 
         # preparing mask and length info
-        self.Q_mask = tf.cast(tf.cast(self.QText, tf.bool), tf.float32)
-        self.C_mask = tf.cast(tf.cast(self.CText, tf.bool), tf.float32)
-        # self.q_features, self.c_features = self.equal_features(self.QText, self.CText)
-        self.Q_maxlen = tf.reduce_max(self.Q_len)
-        self.C_maxlen = tf.reduce_max(self.C_len)
+        self.Q_mask = tf.cast(tf.cast(self.QText, tf.bool), tf.float32)  # (B, Lq)
+        self.C_mask = tf.cast(tf.cast(self.CText, tf.bool), tf.float32)  # (B, 10, Lc)
+        self.rel_mask = tf.cast(tf.cast(self.C_len, tf.bool), tf.float32)  # (B, 10)
 
         self.N = tf.shape(self.Q_mask)[0]
 
@@ -126,14 +121,16 @@ class CQAModel:
         self.QS, self.CT, self.cate_f = self.embedding()
 
         # building model
-        self.output = self.build_model()
+        self.output = self.build_model()  # (B, 10, 2)
+        print(self.output)
 
         # computing loss
         with tf.variable_scope('predict'):
-            self.predict_prob = tf.nn.softmax(self.output)
+            self.predict_prob = tf.nn.softmax(self.output, axis=2)
             labels = tf.one_hot(self.Rel, self.args.categories_num, dtype=tf.float32)
             losses = tf.nn.softmax_cross_entropy_with_logits(labels=labels, logits=self.output)
-            self.loss = tf.reduce_mean(losses)
+            print('losses: ', losses)
+            self.loss = tf.reduce_sum(losses * self.rel_mask) / tf.reduce_sum(self.rel_mask)
             if self.args.l2_weight != 0:
                 for v in tf.trainable_variables():
                     self.loss += self.args.l2_weight * tf.nn.l2_loss(v)
@@ -141,53 +138,40 @@ class CQAModel:
         # counting parameters
         self.count()
 
-        self.train_op = None
-        self.ready_train(self._lr, 1000)
+        # getting ready for training
+        # self.opt = tf.train.AdagradOptimizer(learning_rate=self._lr)
+        self.opt = tf.train.AdamOptimizer(learning_rate=self._lr, epsilon=1e-6)
+        grads = self.opt.compute_gradients(self.loss)
+        gradients, variables = zip(*grads)
+        capped_grads, _ = tf.clip_by_global_norm(gradients, clip_norm=5.0)
+        self.train_op = self.opt.apply_gradients(zip(capped_grads, variables),
+                                                 global_step=self._global_step)
 
     def create_input(self):
-        qTEXT = tf.placeholder(tf.int32, [self.batch_size, None])
+        qTEXT = tf.placeholder(tf.int32, [self.batch_size, self.Q_maxlen])
         q_len = tf.placeholder(tf.int32, [self.batch_size])
-        cTEXT = tf.placeholder(tf.int32, [self.batch_size, None])
-        c_len = tf.placeholder(tf.int32, [self.batch_size])
-        q_char = tf.placeholder(tf.int32, [self.batch_size, None, self.char_max_len])
-        c_char = tf.placeholder(tf.int32, [self.batch_size, None, self.char_max_len])
+        cTEXT = tf.placeholder(tf.int32, [self.batch_size, 10, self.C_maxlen])
+        c_len = tf.placeholder(tf.int32, [self.batch_size, 10])
+        q_char = tf.placeholder(tf.int32, [self.batch_size, self.Q_maxlen, self.char_max_len])
+        c_char = tf.placeholder(tf.int32, [self.batch_size, 10, self.C_maxlen, self.char_max_len])
         inputs = [qTEXT, q_len, cTEXT, c_len, q_char, c_char]
 
-        if self.args.use_bert:
-            q_bert = tf.placeholder(tf.float32, [self.batch_size, None, self.args.bert_dim])
-            c_bert = tf.placeholder(tf.float32, [self.batch_size, None, self.args.bert_dim])
-            inputs += [q_bert, c_bert]
-        else:
-            inputs += [None] * 2
-
         cate = tf.placeholder(tf.int32, [self.batch_size])
-        rel = tf.placeholder(tf.int32, [self.batch_size])
+        rel = tf.placeholder(tf.int32, [self.batch_size, 10])
 
         return inputs + [cate, rel]
 
     def embedding(self):
         # word embedding
         with tf.variable_scope('emb'):
-            if self.args.use_word_level:
-                QS = tf.nn.embedding_lookup(self.word_mat, self.QText)
-                CT = tf.nn.embedding_lookup(self.word_mat, self.CText)
-
-                if self.args.use_bert:
-                    if self.args.merge_type is 'concat':
-                        QS = tf.concat([QS, self.Q_bert], -1)
-                        CT = tf.concat([CT, self.C_bert], -1)
-                    elif self.args.merge_type is 'plus':
-                        QS = QS + self.Q_bert
-                        CT = CT + self.C_bert
-            else:
-                QS = self.Q_bert
-                CT = self.C_bert
+            QS = tf.nn.embedding_lookup(self.word_mat, self.QText)
+            CT = tf.nn.embedding_lookup(self.word_mat, self.CText)  # (B, 10, Lc, 300)
 
             if self.args.use_char_level:
                 self.char_embedding = tf.get_variable('char_mat', [self.char_num + 1, self.args.char_dim],
                                                       trainable=self.args.char_trainable)
                 q_char = tf.reshape(self.Q_char, [-1, tf.shape(self.Q_char)[2]])
-                c_char = tf.reshape(self.C_char, [-1, tf.shape(self.C_char)[2]])
+                c_char = tf.reshape(self.C_char, [-1, tf.shape(self.C_char)[3]])
                 q_cmask = tf.cast(tf.cast(q_char, tf.bool), tf.float32)
                 c_cmask = tf.cast(tf.cast(c_char, tf.bool), tf.float32)
 
@@ -198,22 +182,18 @@ class CQAModel:
                 q_char_emb = text_cnn(q_char_emb, q_cmask)
                 c_char_emb = text_cnn(c_char_emb, c_cmask)
 
-                q_char_emb = tf.reshape(q_char_emb, [self.N, -1, 300])
-                c_char_emb = tf.reshape(c_char_emb, [self.N, -1, 300])
+                q_char_emb = tf.reshape(q_char_emb, [self.N, self.Q_maxlen, 300])
+                c_char_emb = tf.reshape(c_char_emb, [self.N, 10, self.C_maxlen, 300])
 
-                if self.args.merge_type is 'concat':
-                    QS = tf.concat([QS, q_char_emb], -1)
-                    CT = tf.concat([CT, c_char_emb], -1)
-                elif self.args.merge_type is 'plus':
-                    QS = QS + q_char_emb
-                    CT = CT + c_char_emb
-                else:
-                    raise ValueError('merge_type error')
+                QS = tf.concat([QS, q_char_emb], -1)
+                CT = tf.concat([CT, c_char_emb], -1)
 
-            if self.args.use_highway:
-                highway = MultiLayerHighway(300, 1, tf.nn.elu, self.dropout_keep_prob, self._is_train)
-                QS = highway(QS)
-                CT = highway(CT)
+                # QS = QS + q_char_emb
+                # CT = CT + c_char_emb
+
+            highway = MultiLayerHighway(300, 1, tf.nn.elu, self.dropout_keep_prob, self._is_train)
+            QS = highway(QS)
+            CT = highway(CT)
 
             category_mat = tf.get_variable('cate_mat', shape=[33, 25], dtype=tf.float32,
                                            initializer=tf.glorot_uniform_initializer(),
@@ -221,20 +201,6 @@ class CQAModel:
             cate_f = tf.nn.embedding_lookup(category_mat, self.Qcate)
 
             return [QS, CT, cate_f]
-
-    def equal_features(self, text_a, text_b):
-        expanded_a = tf.expand_dims(text_a, axis=2)  # (B, L1, 1)
-        expanded_b = tf.expand_dims(text_b, axis=1)  # (B, 1, L2)
-
-        shape = [-1, tf.shape(text_a)[1], tf.shape(text_b)[2]]
-        text_a = tf.tile(expanded_a, shape)
-        text_b = tf.tile(expanded_b, shape)
-
-        truth_matrix = tf.equal(text_a, text_b)
-        features_a = tf.cast(tf.reduce_any(truth_matrix, 2), tf.float32)  # (B, L1)
-        features_b = tf.cast(tf.reduce_any(truth_matrix, 1), tf.float32)  # (B, L2)
-
-        return features_a, features_b
 
     @property
     def cweight(self):
@@ -284,33 +250,51 @@ class CQAModel:
         raise NotImplementedError
 
     def evaluate(self, eva_data, steps_num, eva_type, eva_ID=None):
-        label = []
-        predict = []
+        labels = []
+        predicts = []
         loss = []
         with tqdm(total=steps_num, ncols=70) as tbar:
-            # processed_samples = 0
+            processed_samples = 0
             for batch_eva_data in eva_data:
                 batch_label = batch_eva_data[-1]
                 feed_dict = {inv: array for inv, array in zip(self.inputs, batch_eva_data)}
                 batch_loss, batch_predict = self.sess.run([self.loss, self.predict_prob], feed_dict=feed_dict)
-                label.append(batch_label)
+                labels.append(batch_label)
                 loss.append(batch_loss * batch_label.shape[0])
-                predict.append(batch_predict)
+                predicts.append(batch_predict)
 
                 tbar.update(batch_label.shape[0])
 
-                # processed_samples += self.batch_size
-                # if processed_samples >= steps_num:
-                #     break
+                processed_samples += self.args.batch_size
+                if processed_samples >= steps_num:
+                    break
 
-        label = np.concatenate(label, axis=0)[:steps_num]
-        predict = np.concatenate(predict, axis=0)[:steps_num]
+        labels = np.concatenate(labels, axis=0)[:steps_num]
+        predicts = np.concatenate(predicts, axis=0)[:steps_num]
         loss = sum(loss) / steps_num
         # predict = (predict > 0.5).astype('int32').reshape((-1,))
-        metrics = PRF(label, predict.argmax(axis=-1))
+
+        eva_ID_len = [len(a) for a in eva_ID]
+        res_labels = []
+        res_predicts = []
+        for length, label, predict in zip(eva_ID_len, labels.tolist(), predicts.tolist()):
+            res_labels += label[:length]
+            res_predicts += predict[:length]
+
+        # print(len(res_labels), steps_num)
+        assert len(res_labels) == steps_num * 10
+
+        def itertools_chain(a):
+            return list(itertools.chain.from_iterable(a))
+
+        eva_ID = itertools_chain(eva_ID)
+        res_labels = np.asarray(res_labels)
+        res_predicts = np.asarray(res_predicts)
+
+        metrics = PRF(res_labels, res_predicts.argmax(axis=-1))
         metrics['loss'] = loss
 
-        MAP, AvgRec, MRR = eval_reranker(eva_ID, label, predict[:, 0])
+        MAP, AvgRec, MRR = eval_reranker(eva_ID, res_labels, res_predicts[:, 0])
         metrics['MAP'] = MAP
         metrics['AvgRec'] = AvgRec
         metrics['MRR'] = MRR
@@ -330,19 +314,7 @@ class CQAModel:
             tag="{}/acc".format(eva_type), simple_value=metrics['acc']), ])
         return metrics, [loss_summ, macro_F_summ, acc, MAP_summ, AvgRec_summ, MRR_summ]
 
-    def ready_train(self, lr, num_train_steps):
-        # getting ready for training
-        # self.opt = tf.train.AdagradOptimizer(learning_rate=self._lr)
-        self.opt = tf.train.AdamOptimizer(learning_rate=self._lr, epsilon=1e-6)
-        grads = self.opt.compute_gradients(self.loss)
-        gradients, variables = zip(*grads)
-        capped_grads, _ = tf.clip_by_global_norm(gradients, clip_norm=5.0)
-        self.train_op = self.opt.apply_gradients(zip(capped_grads, variables),
-                                                 global_step=self._global_step)
-
-        # self.train_op = optimization.create_optimizer(self.loss, lr, num_train_steps, None, False)
-
-    def one_train(self, batch_dataset, path, config, fold_num=None):
+    def one_train(self, batch_dataset, saver, writer, config, fold_num=None):
         loss_save = 100
         patience_loss = 0
         map_save = 0
@@ -350,41 +322,25 @@ class CQAModel:
         self.lr = config.lr
         self.dropout = config.dropout
 
-        # train_data = batch_dataset.batch_train_data(fold_num=fold_num)
-        # train_steps = batch_dataset.train_steps_num
-
-        # num_trian_steps = math.ceil(train_steps / self.args.batch_size * self.args.epochs)
-        # self.ready_train(config.lr, num_trian_steps)
-
-        saver = tf.train.Saver(max_to_keep=10)
-        self.sess.run(tf.global_variables_initializer())
-
-        if config.load_best_model and os.path.exists(path):
-            print('------------  load model  ------------')
-            saver.restore(self.sess, tf.train.latest_checkpoint(path))
-        if not os.path.exists(path):
-            os.mkdir(path)
-        writer = tf.summary.FileWriter(path)
-
-        for epoch in range(self.args.epochs):
+        for _ in range(1):
             print('---------------------------------------')
-            print('EPOCH %d' % epoch)
+            # print('EPOCH %d' % epoch)
 
             print('---------------------------------------------')
             print('process train data')
-            train_data = [a for a in batch_dataset.batch_train_data(fold_num=fold_num)]
+            train_data = batch_dataset.batch_train_data()
             train_steps = batch_dataset.train_steps_num
             print('---------------------------------------------')
 
             print('class weight: ', batch_dataset.cweight)
             # self.cweight = [.9, 5., 1.1]
 
-            print('\n---------------------------------------------')
-            print('process dev data')
-            dev_data = [a for a in batch_dataset.batch_dev_data()]
-            dev_steps = batch_dataset.dev_steps_num
-            dev_id = batch_dataset.c_id_dev
-            print('----------------------------------------------\n')
+            # print('\n---------------------------------------------')
+            # print('process dev data')
+            # dev_data = batch_dataset.batch_dev_data()
+            # dev_steps = batch_dataset.dev_steps_num
+            # dev_id = batch_dataset.c_id_dev
+            # print('----------------------------------------------\n')
 
             print('the number of samples: %d\n' % train_steps)
 
@@ -393,7 +349,7 @@ class CQAModel:
             self.is_training = True
             self.dropout = config.dropout
 
-            with tqdm(total=train_steps, ncols=70) as tbar:
+            with tqdm(total=self.args.max_steps, ncols=70) as tbar:
                 for batch_train_data in train_data:
                     feed_dict = {inv: array for inv, array in zip(self.inputs, batch_train_data)}
                     loss, train_op = self.sess.run([self.loss, self.train_op], feed_dict=feed_dict)
@@ -408,12 +364,12 @@ class CQAModel:
                         self.is_training = False
                         self.dropout = 1.0
 
-                        # print('\n---------------------------------------------')
-                        # print('process dev data')
-                        # dev_data = batch_dataset.batch_dev_data()
-                        # dev_steps = batch_dataset.dev_steps_num
-                        # dev_id = batch_dataset.c_id_dev
-                        # print('----------------------------------------------\n')
+                        print('\n---------------------------------------------')
+                        print('process dev data')
+                        dev_data = batch_dataset.batch_dev_data()
+                        dev_steps = batch_dataset.dev_steps_num
+                        dev_id = batch_dataset.c_id_dev
+                        print('----------------------------------------------\n')
 
                         val_metrics, summ = self.evaluate(dev_data, dev_steps, 'dev', dev_id)
                         val_metrics['step'] = self.global_step
@@ -461,8 +417,8 @@ class CQAModel:
                         # print_metrics(metrics, 'train', path, categories_num=self.args.categories_num)
                         # print_metrics(val_metrics, 'val', path)
                         saver.save(self.sess, filename)
-                        # if self.global_step >= self.args.max_steps:
-                        #     break
+                        if self.global_step >= self.args.max_steps:
+                            break
 
                     tbar.update(batch_dataset.batch_size)
 
@@ -470,11 +426,20 @@ class CQAModel:
 
     def train(self, batch_dataset: BatchDatasets, config):
         with self.sess:
+            saver = tf.train.Saver(max_to_keep=10)
+            self.sess.run(tf.global_variables_initializer())
+
             path = os.path.join(config.model_dir, self.__class__.__name__)
             if not os.path.exists(config.model_dir):
                 os.mkdir(config.model_dir)
 
-            return self.one_train(batch_dataset, path, config)
+            if config.load_best_model and os.path.exists(path):
+                print('------------  load model  ------------')
+                saver.restore(self.sess, tf.train.latest_checkpoint(path))
+            if not os.path.exists(path):
+                os.mkdir(path)
+            writer = tf.summary.FileWriter(path, graph=self.sess.graph)
+            return self.one_train(batch_dataset, saver, writer, config)
 
     def one_test(self, batch_dataset, config):
         test_data = [batch for batch in batch_dataset.batch_test_data(2 * config.batch_size)]
@@ -489,17 +454,9 @@ class CQAModel:
         with self.sess:
             self.sess.run(tf.global_variables_initializer())
             saver = tf.train.Saver()
-            if config.k_fold > 1:
-                sub_dir = os.listdir(config.model_dir)
-                for name in sub_dir:
-                    path = os.path.join(config.model_dir, name)
-                    print(tf.train.latest_checkpoint(config.model_dir))
-                    saver.restore(self.sess, tf.train.latest_checkpoint(path))
-                    self.one_test(batch_dataset, config)
-            else:
-                print(tf.train.latest_checkpoint(config.model_dir))
-                saver.restore(self.sess, tf.train.latest_checkpoint(config.model_dir))
-                self.one_test(batch_dataset, config)
+            print(tf.train.latest_checkpoint(config.model_dir))
+            saver.restore(self.sess, tf.train.latest_checkpoint(config.model_dir))
+            self.one_test(batch_dataset, config)
 
     def count(self):
         total_parameters = 0

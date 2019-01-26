@@ -9,10 +9,17 @@ from keras.preprocessing.sequence import pad_sequences
 class BatchDatasets:
     def __init__(self,  q_max_len=None, c_max_len=None, char_max_len=16, word_type='lemma',
                  need_shuffle=True, use_char_level=True, batch_size=64, k_fold=0, categories_num=2,
-                 train_samples: list=None, dev_samples: list=None, test_samples=None, triplets_file=None, args=None):
+                 train_samples: list=None, dev_samples: list=None, test_samples=None,
+                 train_bert_features=None, dev_bert_features=None, test_bert_features=None,
+                 triplets_file=None, args=None):
         self.train_samples = self.processing_sample(train_samples)  # merge
         self.dev_samples = self.processing_sample(dev_samples)
         self.test_samples = self.processing_sample(test_samples)
+
+        self.train_bert_features = self.processing_bert(train_bert_features)
+        self.dev_bert_features = self.processing_bert(dev_bert_features)
+        self.test_bert_features = self.processing_bert(test_bert_features)
+
         self.args = args
         self.q_max_len = q_max_len
         self.c_max_len = c_max_len
@@ -36,6 +43,8 @@ class BatchDatasets:
         self.c_len_train = None
         self.q_char_train = None
         self.c_char_train = None
+        self.q_bert_train = None
+        self.c_bert_train = None
         self.qCate_train = None
         self.rel_train = None
 
@@ -47,6 +56,8 @@ class BatchDatasets:
         self.c_len_dev = None
         self.q_char_dev = None
         self.c_char_dev = None
+        self.q_bert_dev = None
+        self.c_bert_dev = None
         self.qCate_dev = None
         self.rel_dev = None
 
@@ -58,13 +69,15 @@ class BatchDatasets:
         self.c_len_test = None
         self.q_char_test = None
         self.c_char_test = None
+        self.q_bert_test = None
+        self.c_bert_test = None
         self.qCate_test = None
         self.rel_test = None
 
         self.label_name = 'rel_index' if self.categories_num == 3 else 'Rrel_index'
 
         if train_samples is not None and dev_samples is not None:
-            if k_fold > 1:  # merge train data and dev data
+            if k_fold > 1:  # merge train data and dev data. BERT is NOT supported
                 self.train_samples = pd.concat([self.train_samples, self.dev_samples], axis=0, ignore_index=True)
                 skf = StratifiedKFold(n_splits=k_fold, random_state=0)
                 self.index_list = [index
@@ -84,6 +97,15 @@ class BatchDatasets:
 
         return new_samples
 
+    @staticmethod
+    def processing_bert(features_list):
+        if features_list is None or len(features_list) == 0:
+            return None
+
+        new_features = pd.concat(features_list, axis=0, ignore_index=True)
+
+        return new_features
+
     def get_len(self, e, max_len):
         return min(len(max(e, key=len)), max_len)
 
@@ -91,25 +113,30 @@ class BatchDatasets:
     def pad_sentence(e, maxlen):
         return pad_sequences(e, padding='post', truncating='post', maxlen=maxlen)
 
-    def padding(self, qtext, q_len, ctext, c_len, q_char, c_char):
-        # q_max_len = min(max(q_len), self.q_max_len)
-        q_max_len = self.q_max_len
+    def padding(self, qtext, q_len, ctext, c_len, q_char, c_char, q_bert=None, c_bert=None):
+        q_max_len = min(max(q_len), self.q_max_len)
+        # q_max_len = self.q_max_len
         q_len[q_len > q_max_len] = q_max_len
-        # c_max_len = min(max(c_len), self.c_max_len)
-        c_max_len = self.c_max_len
+        c_max_len = min(max(c_len), self.c_max_len)
+        # c_max_len = self.c_max_len
         c_len[c_len > c_max_len] = c_max_len
         cur_max_len = [q_max_len, c_max_len]
+
         pad_res = [self.pad_sentence(e, maxlen=l) for e, l in zip([qtext, ctext], cur_max_len)]
         pad_char_res = [self.pad_sentence(e, maxlen=l) for e, l in zip([q_char, c_char], cur_max_len)]
-        return [pad_res[0], q_len, pad_res[1], c_len] + pad_char_res
+        pad_bert_res = []
+        if self.args.use_bert:
+            pad_bert_res = [self.pad_sentence(e, maxlen=l) for e, l in zip([q_bert, c_bert], cur_max_len)]
 
-    def mini_batch_data(self, qText, q_len, cText, c_len, q_char, c_char, cate, rel, batch_size):
+        return [pad_res[0], q_len, pad_res[1], c_len] + pad_char_res + pad_bert_res
+
+    def mini_batch_data(self, qText, q_len, cText, c_len, q_char, c_char, cate, rel, batch_size, q_bert=None, c_bert=None):
         data_size = rel.shape[0]
-        batch_start = 0
-        # for batch_start in np.arange(0, data_size, batch_size):
-        for step in range(self.args.max_steps):
+        # batch_start = 0
+        for batch_start in np.arange(0, data_size, batch_size):
+            # for step in range(self.args.max_steps):
             batch_end = batch_start + batch_size
-            sl = slice(batch_start, min(batch_end, data_size))
+            sl = slice(batch_start, batch_end)
             batch_qText = qText[sl]
             batch_q_len = q_len[sl]
             batch_cText = cText[sl]
@@ -119,19 +146,27 @@ class BatchDatasets:
             batch_cate = cate[sl]
             batch_rel = rel[sl]
 
-            batch_start = batch_end % data_size
-            if batch_end > data_size:
-                sl = slice(0, batch_start)
-                batch_qText = batch_qText + qText[sl]
-                batch_q_len = np.concatenate([batch_q_len, q_len[sl]], 0)
-                batch_cText = batch_cText + cText[sl]
-                batch_c_len = np.concatenate([batch_c_len, c_len[sl]], 0)
-                batch_q_char = np.concatenate([batch_q_char, q_char[sl]], 0)
-                batch_c_char = np.concatenate([batch_c_char, c_char[sl]], 0)
-                batch_cate = np.concatenate([batch_cate, cate[sl]], 0)
-                batch_rel = np.concatenate([batch_rel, rel[sl]], 0)
+            batch_q_bert = None
+            batch_c_bert = None
+            if self.args.use_bert:
+                batch_q_bert = q_bert[sl]
+                batch_c_bert = c_bert[sl]
 
-            yield self.padding(batch_qText, batch_q_len, batch_cText, batch_c_len, batch_q_char, batch_c_char) + [batch_cate, batch_rel]
+            # batch_start = batch_end % data_size
+            # if batch_end > data_size:
+            #     sl = slice(0, batch_start)
+            #     batch_qText = batch_qText + qText[sl]
+            #     batch_q_len = np.concatenate([batch_q_len, q_len[sl]], 0)
+            #     batch_cText = batch_cText + cText[sl]
+            #     batch_c_len = np.concatenate([batch_c_len, c_len[sl]], 0)
+            #     batch_q_char = np.concatenate([batch_q_char, q_char[sl]], 0)
+            #     batch_c_char = np.concatenate([batch_c_char, c_char[sl]], 0)
+            #     batch_cate = np.concatenate([batch_cate, cate[sl]], 0)
+            #     batch_rel = np.concatenate([batch_rel, rel[sl]], 0)
+
+            yield self.padding(batch_qText, batch_q_len, batch_cText, batch_c_len,
+                               batch_q_char, batch_c_char,
+                               batch_q_bert, batch_c_bert) + [batch_cate, batch_rel]
 
     def compute_class_weight(self, train_label):
         label = train_label
@@ -239,23 +274,41 @@ class BatchDatasets:
                 shuffle_index = [i for i in range(len(self.train_samples))]
                 np.random.shuffle(shuffle_index)
                 self.train_samples = self.train_samples.iloc[shuffle_index]
+
+            # train examples
+            q_len_name = 'qTEXT_pro_len' if 'pro' in self.word_type else 'qTEXT_len'
+            c_len_name = 'cTEXT_pro_len' if 'pro' in self.word_type else 'cTEXT_len'
             self.qTEXT_train = self.train_samples['qTEXT_{}_index'.format(self.word_type)].values.tolist()
-            self.q_len_train = self.train_samples['qTEXT_len'].values
+            self.q_len_train = self.train_samples[q_len_name].values
             self.cTEXT_train = self.train_samples['cTEXT_{}_index'.format(self.word_type)].values.tolist()
-            self.c_len_train = self.train_samples['cTEXT_len'].values
+            self.c_len_train = self.train_samples[c_len_name].values
+
             self.q_char_train = self.train_samples['qTEXT_{}_char_index'.format(self.word_type)].values
             self.c_char_train = self.train_samples['cTEXT_{}_char_index'.format(self.word_type)].values
+
+            if self.args.use_bert:
+                self.q_bert_train = self.train_bert_features['q_vec'].values
+                self.c_bert_train = self.train_bert_features['c_vec'].values
+
             self.qCate_train = self.train_samples['cate_index'].values
             self.rel_train = self.train_samples[self.label_name].values
 
+            # dev examples
             self.q_id_dev = self.dev_samples['q_id'].values
             self.c_id_dev = self.dev_samples['c_id'].values
             self.qTEXT_dev = self.dev_samples['qTEXT_{}_index'.format(self.word_type)].values.tolist()
-            self.q_len_dev = self.dev_samples['qTEXT_len'].values
+
+            self.q_len_dev = self.dev_samples[q_len_name].values
             self.cTEXT_dev = self.dev_samples['cTEXT_{}_index'.format(self.word_type)].values.tolist()
-            self.c_len_dev = self.dev_samples['cTEXT_len'].values
+            self.c_len_dev = self.dev_samples[c_len_name].values
+
             self.q_char_dev = self.dev_samples['qTEXT_{}_char_index'.format(self.word_type)].values
             self.c_char_dev = self.dev_samples['cTEXT_{}_char_index'.format(self.word_type)].values
+
+            if self.args.use_bert:
+                self.q_bert_dev = self.dev_bert_features['q_vec'].values
+                self.c_bert_dev = self.dev_bert_features['c_vec'].values
+
             self.qCate_dev = self.dev_samples['cate_index'].values
             self.rel_dev = self.dev_samples[self.label_name].values
 
@@ -265,7 +318,8 @@ class BatchDatasets:
         batch_size = self.batch_size if batch_size is None else batch_size
         return self.mini_batch_data(self.qTEXT_train, self.q_len_train, self.cTEXT_train, self.c_len_train,
                                     self.q_char_train, self.c_char_train,
-                                    self.qCate_train, self.rel_train, batch_size)
+                                    self.qCate_train, self.rel_train, batch_size,
+                                    self.q_bert_train, self.c_bert_train)
 
     def batch_dev_data(self, dev_batch_size=None):
         self.dev_steps_num = self.rel_dev.shape[0]
@@ -273,7 +327,8 @@ class BatchDatasets:
         batch_size = self.batch_size if dev_batch_size is None else dev_batch_size
         return self.mini_batch_data(self.qTEXT_dev, self.q_len_dev, self.cTEXT_dev, self.c_len_dev,
                                     self.q_char_dev, self.c_char_dev,
-                                    self.qCate_dev, self.rel_dev, batch_size)
+                                    self.qCate_dev, self.rel_dev, batch_size,
+                                    self.q_bert_dev, self.c_bert_dev)
 
     def batch_test_data(self, test_batch_size=None):
         assert self.test_samples is not None
@@ -284,8 +339,14 @@ class BatchDatasets:
         self.q_len_test = self.test_samples['qTEXT_len'].values
         self.cTEXT_test = self.test_samples['cTEXT_{}_index'.format(self.word_type)].values.tolist()
         self.c_len_test = self.test_samples['cTEXT_len'].values
+
         self.q_char_test = self.test_samples['qTEXT_{}_char_index'.format(self.word_type)].values
         self.c_char_test = self.test_samples['cTEXT_{}_char_index'.format(self.word_type)].values
+
+        if self.args.use_bert:
+            self.q_bert_test = self.test_bert_features['q_vec'].values
+            self.c_bert_test = self.test_bert_features['c_vec'].values
+
         self.qCate_test = self.test_samples['cate_index'].values
         self.rel_test = self.test_samples[self.label_name].values
 
@@ -296,4 +357,5 @@ class BatchDatasets:
         batch_size = self.batch_size if test_batch_size is None else test_batch_size
         return self.mini_batch_data(self.qTEXT_test, self.q_len_test, self.cTEXT_test, self.c_len_test,
                                     self.q_char_test, self.c_char_test,
-                                    self.qCate_test, self.rel_test, batch_size)
+                                    self.qCate_test, self.rel_test, batch_size,
+                                    self.q_bert_test, self.c_bert_test)

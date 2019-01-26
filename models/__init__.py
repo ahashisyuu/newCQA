@@ -5,7 +5,9 @@ from .Baseline2 import Baseline2
 from .Baseline3 import Baseline3
 from .Baseline3_2 import Baseline3_2
 from .Baseline3_3 import Baseline3_3
+from .Baseline3_3_2 import Baseline3_3_2
 from .Baseline3_4 import Baseline3_4
+from .Baseline3_4_Top10 import Baseline3_4_Top10
 from .Baseline3_5 import Baseline3_5
 from .Baseline4 import Baseline4
 from .Baseline5 import Baseline5

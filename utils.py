@@ -57,7 +57,7 @@ def print_metrics(metrics, metrics_type, save_dir=None):
     each_prf = [[v * 100 for v in prf] for prf in zip(*metrics['each_prf'])]
     macro_prf = [v * 100 for v in metrics['macro_prf']]
     loss = metrics['loss']
-    epoch = metrics['epoch']
+    epoch = metrics['step']
     lines = ['\n\n**********************************************************************************',
              '*                                                                                *',
              '*                           {}                                  *'.format(

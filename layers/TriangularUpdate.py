@@ -1,8 +1,9 @@
 import collections
 import tensorflow as tf
 
-from tensorflow.contrib.rnn import LayerRNNCell, initializers, RNNCell
+from tensorflow.contrib.rnn import LayerRNNCell, RNNCell
 from tensorflow.python.ops.rnn_cell_impl import _zero_state_tensors
+from tensorflow.python.keras import initializers
 
 _TriangularStateTuple = collections.namedtuple("TriangularStateTuple", ("s1", "s2", "s3",
                                                                         "values1", "values2", "values3",
@@ -90,16 +91,22 @@ class TriangularCell(LayerRNNCell):
 
         with tf.name_scope(type(self).__name__ + "ZeroState", values=[batch_size]):
             sent1 = tf.reshape(self.sent1, [-1, self.sent1_length * self.dim])
-            sent2 = tf.reshape(self.sent1, [-1, self.sent2_length * self.dim])
-            sent3 = tf.reshape(self.sent1, [-1, self.sent3_length * self.dim])
+            sent2 = tf.reshape(self.sent2, [-1, self.sent2_length * self.dim])
+            sent3 = tf.reshape(self.sent3, [-1, self.sent3_length * self.dim])
 
             values = _zero_state_tensors([self.keys_num * self.dim] * 3, batch_size, dtype)
 
-            r1_h = r2_h = r3_h = tf.reshape(self.keys, [self.keys_num * self.dim])
+            rh = tf.reshape(self.keys, [self.keys_num * self.dim])
+            rh = tf.tile(tf.expand_dims(rh, axis=0), [batch_size, 1])
+            r1_h = r2_h = r3_h = rh
 
             s_h = _zero_state_tensors([self.dim] * 3, batch_size, dtype)
 
-            return [sent1, sent2, sent3] + values + [r1_h, r2_h, r3_h] + s_h
+
+            print(type(s_h))
+            state_list = [sent1, sent2, sent3] + values + [r1_h, r2_h, r3_h] + s_h
+
+            return TriangularStateTuple(*state_list)
 
     @property
     def state_size(self):
@@ -125,12 +132,12 @@ class TriangularCell(LayerRNNCell):
                                                initializer=self.initializer)
 
         # parameters which sentence updating needs
-        self.att_r_kernel = self.add_variable(name="r_kernel",
+        self.att_r_kernel = self.add_variable(name="att_r_kernel",
                                               shape=[2 * self.dim, self.num_units],
                                               initializer=self.initializer)
         self.att_r_v = self.r_v
 
-        self.s_kernel = self.add_variable(name="r_kernel",
+        self.s_kernel = self.add_variable(name="s_kernel",
                                           shape=[4 * self.dim, self.num_units],
                                           initializer=self.initializer)
         self.s_v = self.r_v
@@ -197,10 +204,12 @@ class TriangularCell(LayerRNNCell):
         score = self.pro_compute(r1_h, r2_h, r3_h, s1_h, s2_h, s3_h)  # (B, 1)
         m = tf.concat([output, score], axis=1)
 
-        return m, [s1, s2, s3,
-                   values1, values2, values3,
-                   r1_h, r2_h, r3_h,
-                   s1_h, s2_h, s3_h]
+        state = [s1, s2, s3,
+                 values1, values2, values3,
+                 r1_h, r2_h, r3_h,
+                 s1_h, s2_h, s3_h]
+
+        return m, TriangularStateTuple(*state)
 
     def update_relation(self, values_tm,
                         s1, s1_len, s1_mask,
@@ -210,18 +219,21 @@ class TriangularCell(LayerRNNCell):
         # s1, s2: (B, Lx * dim);  s1_len, s2_len: scalar;  s1_mask, s2_mask: (B, Lx) or None
         # r_h_tm: (B, keys_num * dim)
 
-        values_tm = tf.reshape(values_tm, [-1, self.keys_num, self.dim])  # (B, keys_num, dim)
+        values_tm = tf.reshape(values_tm, [-1, self.keys_num, self.dim])  # (keys_num, dim)
         s1 = tf.reshape(s1, [-1, s1_len, self.dim])                       # (B, L1, dim)
         s2 = tf.reshape(s2, [-1, s2_len, self.dim])                       # (B, L2, dim)
-        r_h_tm = tf.reshape(r_h_tm, [-1, self.keys_num, self.dim])        # (B, keys_num, dim)
+        r_h_tm = tf.reshape(r_h_tm, [-1, self.keys_num, self.dim])        # (keys_num, dim)
 
         # <1> GET new_values (new relation values)
         s_cat = tf.concat([s1, s2], axis=1)  # (B, L1 + L2, dim) -> (B, L, dim)
-        if s1_mask:
+        if s1_mask is not None:
             s_mask = tf.concat([s1_mask, s2_mask], axis=1)
         else:
             s_mask = None
-        key_cat = tf.concat([self.keys, r_h_tm], axis=2)  # (B, keys_num, 2*dim)
+
+        batch_size = tf.shape(s1)[0]
+        keys = tf.tile(tf.expand_dims(self.keys, axis=0), [batch_size, 1, 1])
+        key_cat = tf.concat([keys, r_h_tm], axis=2)  # (B, keys_num, 2*dim)
 
         # #===========
         # score function:
@@ -255,12 +267,12 @@ class TriangularCell(LayerRNNCell):
         key = tf.tile(tf.expand_dims(key_cat, axis=1), [1, s1_len + s2_len, 1, 1])  # (B, L, keys_num, 2*dim)
 
         temp_tensor = tf.concat([s, key], axis=3)  # (B, L, keys_num, 3*dim)
-        temp_array = tf.matmul(temp_tensor, self.r_kernel)  # (B, L, keys_num, units)
+        temp_array = tf.keras.backend.dot(temp_tensor, self.r_kernel)  # (B, L, keys_num, units)
         if self.use_bias:
             temp_array = tf.nn.bias_add(temp_array, self.r_bias)
-        score = tf.matmul(tf.tanh(temp_array), self.r_v)  # (B, L, keys_num, 1)
+        score = tf.keras.backend.dot(tf.tanh(temp_array), self.r_v)  # (B, L, keys_num, 1)
 
-        if s_mask:
+        if s_mask is not None:
             s_mask = tf.expand_dims(tf.expand_dims(s_mask, axis=-1), axis=-1)
             score -= (1 - s_mask) * 1e10
         alpha = tf.nn.softmax(score, axis=1)
@@ -288,7 +300,7 @@ class TriangularCell(LayerRNNCell):
         # #===========
 
         temp_tensor = tf.concat([values_tm, new_values, r_h_tm], axis=-1)  # (B, keys_nums, 3*dim)
-        temp_array = tf.matmul(temp_tensor, self.r_gate_kernel)  # (B, keys_nums, 3*dim) or (B, keys_nums, 1)
+        temp_array = tf.keras.backend.dot(temp_tensor, self.r_gate_kernel)  # (B, keys_nums, 3*dim) or (B, keys_nums, 1)
         if self.use_bias:
             temp_array = tf.nn.bias_add(temp_array, self.r_gate_bias)  # bias: (3*dim,) or (1,)
         gate = tf.sigmoid(temp_array)
@@ -300,7 +312,7 @@ class TriangularCell(LayerRNNCell):
 
         r_cell_input = tf.reshape(new_values, [-1, self.dim])
         r_h_tm_reshaped = tf.reshape(r_h_tm, [-1, self.dim])
-        r_h_reshaped = self.r_cell(r_cell_input, r_h_tm_reshaped)
+        r_h_reshaped, _ = self.r_cell(r_cell_input, r_h_tm_reshaped)
         r_h = tf.reshape(r_h_reshaped, [-1, self.keys_num * self.dim])
 
         return values, r_h
@@ -336,7 +348,7 @@ class TriangularCell(LayerRNNCell):
         s0 = self.sent_transformer(s0, s0_mask)  # (B, L0, dim)
 
         s0_vec = self.sent_att(s0_h_tm, s0)
-        s0_h = self.sent_cell(s0_vec, s0_h_tm)
+        s0_h, _ = self.sent_cell(s0_vec, s0_h_tm)
 
         s0 = tf.reshape(s0, [-1, s0_len * self.dim])
 
@@ -344,7 +356,7 @@ class TriangularCell(LayerRNNCell):
 
     def pro_compute(self, r1_h, r2_h, r3_h, s1_h, s2_h, s3_h):
         # coming soon
-        B, _ = tf.shape(r1_h)
+        B = tf.shape(r1_h)[0]
 
         output = tf.ones([B, 1], dtype=tf.float32)
 
@@ -392,11 +404,13 @@ class TriangularCell(LayerRNNCell):
         #
         # #==========
 
-        temp_tensor = tf.concat([vector_expanded, self.keys], axis=-1)
-        temp_array = tf.matmul(temp_tensor, self.att_r_kernel)  # (B, keys_num, units)
+        batch_size = tf.shape(vector)[0]
+        keys = tf.tile(tf.expand_dims(self.keys, axis=0), [batch_size, 1, 1])
+        temp_tensor = tf.concat([vector_expanded, keys], axis=-1)
+        temp_array = tf.keras.backend.dot(temp_tensor, self.att_r_kernel)  # (B, keys_num, units)
         if self.use_bias:
             temp_array = tf.nn.bias_add(temp_array, self.att_r_bias)
-        score = tf.matmul(tf.tanh(temp_array), self.att_r_v)  # (B, keys_num, 1)
+        score = tf.keras.backend.dot(tf.tanh(temp_array), self.att_r_v)  # (B, keys_num, 1)
         alpha = tf.nn.softmax(score, axis=1)
 
         output = tf.reduce_sum(alpha * relation, axis=1)
@@ -416,7 +430,7 @@ class TriangularCell(LayerRNNCell):
         s1_r_expanded = tf.tile(tf.expand_dims(tf.expand_dims(s1_r, axis=1), axis=1), [1, s1_len, s0_len, 1])
 
         temp_tensor = tf.concat([s1_expanded, s0_expanded, s1_r_expanded, s0_r_expanded], axis=3)
-        temp_array = tf.matmul(temp_tensor, self.s_kernel)
+        temp_array = tf.keras.backend.dot(temp_tensor, self.s_kernel)
         if self.use_bias:
             temp_array = tf.nn.bias_add(temp_array, self.s_bias)
 
@@ -430,9 +444,9 @@ class TriangularCell(LayerRNNCell):
         #
         # #==========
 
-        score = tf.matmul(tf.tanh(temp_array), self.s_v)  # (B, L1, L0, 1)
+        score = tf.keras.backend.dot(tf.tanh(temp_array), self.s_v)  # (B, L1, L0, 1)
 
-        if s1_mask:
+        if s1_mask is not None:
             s_mask = tf.expand_dims(tf.expand_dims(s1_mask, axis=-1), axis=-1)
             score -= (1 - s_mask) * 1e10
 
@@ -443,7 +457,8 @@ class TriangularCell(LayerRNNCell):
         return output
 
     def sent_att(self, vector, sentence):
-        vector_expanded = tf.tile(tf.expand_dims(vector, axis=1), [1, self.keys_num, 1])
+        sent_len = sentence.get_shape().as_list()[1]
+        vector_expanded = tf.tile(tf.expand_dims(vector, axis=1), [1, sent_len, 1])
 
         # #==========
         # attention score function
@@ -484,10 +499,10 @@ class TriangularCell(LayerRNNCell):
         # #==========
 
         temp_tensor = tf.concat([vector_expanded, sentence], axis=-1)
-        temp_array = tf.matmul(temp_tensor, self.att_s_kernel)  # (B, keys_num, units)
+        temp_array = tf.keras.backend.dot(temp_tensor, self.att_s_kernel)  # (B, keys_num, units)
         if self.use_bias:
             temp_array = tf.nn.bias_add(temp_array, self.att_s_bias)
-        score = tf.matmul(tf.tanh(temp_array), self.att_s_v)  # (B, keys_num, 1)
+        score = tf.keras.backend.dot(tf.tanh(temp_array), self.att_s_v)  # (B, keys_num, 1)
         alpha = tf.nn.softmax(score, axis=1)
 
         output = tf.reduce_sum(alpha * sentence, axis=1)

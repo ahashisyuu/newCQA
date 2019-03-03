@@ -255,7 +255,8 @@ def pad_examples(filename, statistic):
                        "q_type": q_type, "labels": label_ids}
                 # yield [sent1, sent2, sent3,
                 #        mask1, mask2, mask3,
-                #        mark0, mark1, mark2, mark3,
+                #        mar
+                # k0, mark1, mark2, mark3,
                 #        q_type, label_ids]
 
     return _pad
@@ -393,6 +394,7 @@ def input_fn_builder_v2(filenames,
                          "q_type": tf.TensorShape([]),
                          "labels": tf.TensorShape([])}
         d = tf.data.Dataset.from_generator(generator, output_types, output_shapes)
+
         if is_training:
             d = d.repeat()
             d = d.shuffle(buffer_size=100)

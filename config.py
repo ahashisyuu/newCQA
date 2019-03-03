@@ -7,7 +7,7 @@ class Config:
     char_max_len = 20
     epochs = 8
     max_steps = 9000
-    batch_size = 20
+    batch_size = 2
     char_dim = 15
     l2_weight = 0
     margin = 0.1

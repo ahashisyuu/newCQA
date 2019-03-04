@@ -8,6 +8,7 @@ from tqdm import tqdm
 from EvalHook import EvalHook
 from BertCQAModel import BertCQAModel
 from layers.optimization import create_optimizer
+from keras_preprocessing.sequence import pad_sequences
 
 
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = '2'
@@ -23,7 +24,7 @@ parser.add_argument("--batch_size", type=int, default=2)
 parser.add_argument("--train_filenames", type=str, default="bert_train")
 parser.add_argument("--dev_filenames", type=str, default="bert_cqa_eval")
 
-parser.add_argument("--max_sent1_length", type=int, default=39)
+parser.add_argument("--max_sent1_length", type=int, default=30)
 parser.add_argument("--max_sent2_length", type=int, default=110)
 parser.add_argument("--max_sent3_length", type=int, default=152)
 
@@ -125,41 +126,99 @@ def model_fn_builder(num_labels, learning_rate, num_train_steps, config):
     return model_fn
 
 
-def get_examples(filename):
+def get_examples(filename,
+                 sent1_length, sent2_length, sent3_length,
+                 is_training):
     with open(filename, "rb") as fr:
-        pandas_data = pkl.load(filename)
+        pandas_data = pkl.load(fr)  # the dict of DataFrame
+
+        # keys_list = pandas_data.keys()
+        train_list = ["15dev.xml", "15test.xml", "15train.xml",
+                      "16dev.xml", "16test.xml", "16train1.xml", "16train2.xml"]
+
+        sent1 = []
+        sent2 = []
+        sent3 = []
+        q_type = []
+        label_ids = []
+        if is_training:
+            for name in train_list:
+                samples = pandas_data[name]
+
+                sent1 += samples["q_sub_lemma"].values.tolist()
+                sent2 += samples["q_body_lemma"].values.tolist()
+                sent3 += samples["cTEXT_lemma"].values.tolist()
+
+                q_type += samples["cate_index"].values.tolist()
+                label_ids += samples["Rrel_index"].values.tolist()
+
+        else:
+            samples = pandas_data["17test.xml"]
+
+            sent1 += samples["q_sub_lemma"].values.tolist()
+            sent2 += samples["q_body_lemma"].values.tolist()
+            sent3 += samples["cTEXT_lemma"].values.tolist()
+
+            q_type += samples["cate_index"].values.tolist()
+            label_ids += samples["Rrel_index"].values.tolist()
+
         # padding and making mask
+        ls1 = len(sent1)
+        ls2 = len(sent2)
+        ls3 = len(sent3)
+        lq = len(q_type)
+        ll = len(label_ids)
+        assert ls1 == ls2 and ls2 == ls3 and ls3 == lq and lq == ll
+
+        sent1 = pad_sequences(sent1, maxlen=sent1_length,
+                              padding="post", truncating="post")  # (N, L1)
+        sent2 = pad_sequences(sent2, maxlen=sent2_length,
+                              padding="post", truncating="post")
+        sent3 = pad_sequences(sent3, maxlen=sent3_length,
+                              padding="post", truncating="post")
+        mask1 = (sent1 != 0).astype(dtype=np.float32)
+        mask2 = (sent2 != 0).astype(dtype=np.float32)
+        mask3 = (sent3 != 0).astype(dtype=np.float32)
+
+        # convert to numpy
+        q_type = np.asarray(q_type)
+        label_ids = np.asarray(label_ids)
+
         return {"sent1": sent1, "sent2": sent2, "sent3": sent3,
                 "mask1": mask1, "mask2": mask2, "mask3": mask3,
-                "q_type": q_type, "labels": label_ids}
+                "q_type": q_type, "labels": label_ids, "samples_num": ls1}
 
 
 def input_fn_builder(filenames,
                      sent1_length, sent2_length, sent3_length,
                      is_training=True):
 
-    all_data = get_examples(filenames)
+    all_data = get_examples(filenames,
+                            sent1_length, sent2_length, sent3_length,
+                            is_training)
+
+    samples_num = all_data["samples_num"]
 
     def input_fn(params):
         batch_size = params["batch_size"]
 
         d = tf.data.Dataset.from_tensor_slices({
             "sent1":
-                tf.constant(value=all_data["sent1"], shape=[sent1_length], dtype=tf.int32),
+                tf.constant(value=all_data["sent1"], shape=[samples_num, sent1_length], dtype=tf.int32),
             "sent2":
-                tf.constant(value=all_data["sent2"], shape=[sent2_length], dtype=tf.int32),
+                tf.constant(value=all_data["sent2"], shape=[samples_num, sent2_length], dtype=tf.int32),
             "sent3":
-                tf.constant(value=all_data["sent3"], shape=[sent3_length], dtype=tf.int32),
+                tf.constant(value=all_data["sent3"], shape=[samples_num, sent3_length], dtype=tf.int32),
 
             "mask1":
-                tf.constant(value=all_data["mask1"], shape=[sent1_length], dtype=tf.float32),
+                tf.constant(value=all_data["mask1"], shape=[samples_num, sent1_length], dtype=tf.float32),
             "mask2":
-                tf.constant(value=all_data["mask2"], shape=[sent2_length], dtype=tf.float32),
+                tf.constant(value=all_data["mask2"], shape=[samples_num, sent2_length], dtype=tf.float32),
             "mask3":
-                tf.constant(value=all_data["mask3"], shape=[sent3_length], dtype=tf.float32),
+                tf.constant(value=all_data["mask3"], shape=[samples_num, sent3_length], dtype=tf.float32),
 
-            "q_type": tf.constant(value=all_data["q_type"], shape=[], dtype=tf.int32),
-            "labels": tf.constant(value=all_data["labels"], shape=[], dtype=tf.int32),
+            "q_type": tf.constant(value=all_data["q_type"], shape=[samples_num, ], dtype=tf.int32),
+            "labels": tf.constant(value=all_data["labels"], shape=[samples_num, ], dtype=tf.int32),
         })
 
         if is_training:

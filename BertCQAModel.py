@@ -167,7 +167,9 @@ class BertCQAModel:
             sent_cell = r_cell = sr_cell
 
             # sent_transformer = self.sent_transformer(hidden_size=dim)
-            highway = MultiLayerHighway(dim, 1, keep_prob=1.0, is_train=self.is_training)
+            highway = MultiLayerHighway(dim, 1, keep_prob=1.0, is_train=tf.constant(self.is_training,
+                                                                                    dtype=tf.bool,
+                                                                                    shape=[]))
 
             def _trans(_sent, _mask):
                 return highway(_sent)

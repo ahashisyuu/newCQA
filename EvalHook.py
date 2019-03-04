@@ -57,6 +57,7 @@ class EvalHook(SessionRunHook):
 
     def after_run(self, run_context, run_values):
         stale_global_step = run_values.results
+        print("global_step: ", stale_global_step)
         if self._timer.should_trigger_for_step(
                 stale_global_step + self._steps_per_run):
             # get the real value after train op.

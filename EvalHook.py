@@ -57,7 +57,6 @@ class EvalHook(SessionRunHook):
 
     def after_run(self, run_context, run_values):
         stale_global_step = run_values.results
-        print("global_step: ", stale_global_step)
         if self._timer.should_trigger_for_step(
                 stale_global_step + self._steps_per_run):
             # get the real value after train op.
@@ -74,7 +73,9 @@ class EvalHook(SessionRunHook):
             self.evaluation()
 
     def evaluation(self):
-        print("")
+        print("=================================================")
+        print("EVALUATION. [STEP] ", self.global_step)
+        print("\n")
         eval_input_fn = input_fn_builder(filenames=self.filenames,
                                          sent1_length=self.sent1_length,
                                          sent2_length=self.sent2_length,
@@ -97,8 +98,8 @@ class EvalHook(SessionRunHook):
 
         total_loss = losses.mean()
 
-        print(type(labels), labels.shape)
-        print(type(predictions), predictions.shape)
+        # print(type(labels), labels.shape)
+        # print(type(predictions), predictions.shape)
 
         metrics = PRF(labels, predictions.argmax(axis=-1))
 

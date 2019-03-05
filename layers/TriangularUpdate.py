@@ -102,8 +102,6 @@ class TriangularCell(LayerRNNCell):
 
             s_h = _zero_state_tensors([self.dim] * 3, batch_size, dtype)
 
-
-            print(type(s_h))
             state_list = [sent1, sent2, sent3] + values + [r1_h, r2_h, r3_h] + s_h
 
             return TriangularStateTuple(*state_list)

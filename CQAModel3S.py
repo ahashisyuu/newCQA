@@ -22,8 +22,8 @@ parser.add_argument("--model_dir", type=str, default="./models/triangular_model"
 parser.add_argument("--save_checkpoints_steps", type=int, default=1000)
 
 parser.add_argument("--lr", type=float, default=2e-5)
-parser.add_argument("--num_train_steps", type=int, default=50000)
-parser.add_argument("--batch_size", type=int, default=2)
+parser.add_argument("--num_train_steps", type=int, default=24000)
+parser.add_argument("--batch_size", type=int, default=4)
 
 parser.add_argument("--train_filenames", type=str, default="datasetFORtri")
 parser.add_argument("--dev_filenames", type=str, default="datasetFORtri")
@@ -81,6 +81,21 @@ def glove_embedding(filename):
     return _embedding
 
 
+def count():
+    total_parameters = 0
+    for variable in tf.trainable_variables():
+        # shape is an array of tf.Dimension
+        shape = variable.get_shape()
+        variable_parameters = 1
+        # print(shape, variable)
+        for dim in shape:
+            variable_parameters *= dim.value
+        total_parameters += variable_parameters
+    print('\n\n------------------------------------------------')
+    print('total_parameters: ', total_parameters)
+    print('------------------------------------------------\n\n')
+
+
 def model_fn_builder(num_labels, learning_rate, num_train_steps, config):
 
     def model_fn(features, labels, mode, params):
@@ -133,7 +148,7 @@ def model_fn_builder(num_labels, learning_rate, num_train_steps, config):
             output_spec = tf.estimator.EstimatorSpec(mode=mode, predictions=predictions)
         else:
             raise ValueError("\n\n=======================\n\tMODE error!!!\n=======================\n\n")
-
+        print(count())
         return output_spec
 
     return model_fn
@@ -147,7 +162,7 @@ def get_examples(filename,
 
         # keys_list = pandas_data.keys()
         train_list = ["15dev.xml", "15test.xml", "15train.xml",
-                      "16dev.xml", "16test.xml", "16train1.xml", "16train2.xml"]
+                      "16dev.xml", "16train1.xml", "16train2.xml"]
 
         sent1 = []
         sent2 = []
@@ -166,7 +181,7 @@ def get_examples(filename,
                 label_ids += samples["Rrel_index"].values.tolist()
 
         else:
-            samples = pandas_data["17test.xml"]
+            samples = pandas_data["16test.xml"]
 
             sent1 += samples["q_sub_lemma_index"].values.tolist()
             sent2 += samples["q_body_lemma_index"].values.tolist()
@@ -190,13 +205,13 @@ def get_examples(filename,
         sent3 = pad_sequences(sent3, maxlen=sent3_length,
                               padding="post", truncating="post")
 
-        for s1, s2, s3 in zip(sent1, sent2, sent3):
-            for a in s1.tolist():
-                assert type(a) == int
-            for a in s2.tolist():
-                assert type(a) == int
-            for a in s3.tolist():
-                assert type(a) == int
+        # for s1, s2, s3 in zip(sent1, sent2, sent3):
+        #     for a in s1.tolist():
+        #         assert type(a) == int
+        #     for a in s2.tolist():
+        #         assert type(a) == int
+        #     for a in s3.tolist():
+        #         assert type(a) == int
 
         mask1 = (sent1 != 0).astype(dtype=np.float32)
         mask2 = (sent2 != 0).astype(dtype=np.float32)
@@ -220,6 +235,8 @@ def input_fn_builder(filenames,
                             is_training)
 
     samples_num = all_data["samples_num"]
+    if is_training:
+        print("TRAINING NUMBER is ", samples_num, "\n")
 
     def input_fn(params):
         batch_size = params["batch_size"]
@@ -282,6 +299,7 @@ class EvalHook(SessionRunHook):
         self.sent2_length = sent2_length
         self.sent3_length = sent3_length
         self.dev_cid = read_cid(os.path.join(basic_dir, "eval_cid.pkl"))
+        print("The number of cid: ", len(self.dev_cid))
 
         self._timer = SecondOrStepTimer(every_steps=eval_steps)
         self._steps_per_run = 1
@@ -302,7 +320,6 @@ class EvalHook(SessionRunHook):
 
     def after_run(self, run_context, run_values):
         stale_global_step = run_values.results
-        print("global_step: ", stale_global_step)
         if self._timer.should_trigger_for_step(
                 stale_global_step + self._steps_per_run):
             # get the real value after train op.
@@ -319,7 +336,9 @@ class EvalHook(SessionRunHook):
             self.evaluation()
 
     def evaluation(self):
-        print("")
+        print("=================================================")
+        print("EVALUATION. [STEP] ", self.global_step)
+        print("\n")
         eval_input_fn = input_fn_builder(filenames=self.filenames,
                                          sent1_length=self.sent1_length,
                                          sent2_length=self.sent2_length,
@@ -342,8 +361,8 @@ class EvalHook(SessionRunHook):
 
         total_loss = losses.mean()
 
-        print(type(labels), labels.shape)
-        print(type(predictions), predictions.shape)
+        # print(type(labels), labels.shape)
+        # print(type(predictions), predictions.shape)
 
         metrics = PRF(labels, predictions.argmax(axis=-1))
 

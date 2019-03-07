@@ -5,7 +5,7 @@ import tensorflow as tf
 
 from tqdm import tqdm
 from tensorflow.contrib.layers import xavier_initializer
-from BertCQAModel import BertCQAModel
+from models.CBertCQAModel import BertCQAModel
 from layers.optimization import create_optimizer
 
 
@@ -170,9 +170,21 @@ def model_fn_builder(num_labels, learning_rate, num_train_steps, config):
 
         if mode == tf.estimator.ModeKeys.TRAIN:
             num_warmup_steps = int(num_train_steps * 0.1)
-            train_op = create_optimizer(total_loss, learning_rate,
-                                        num_train_steps, num_warmup_steps,
-                                        False)
+            # train_op = create_optimizer(total_loss, learning_rate,
+            #                             num_train_steps, num_warmup_steps,
+            #                             False)
+            global_step = tf.train.get_or_create_global_step()
+            optimizer = tf.train.AdamOptimizer(learning_rate)
+            grads = optimizer.compute_gradients(total_loss)
+            gradients, tvars = zip(*grads)
+            (clip_grads, _) = tf.clip_by_global_norm(gradients, clip_norm=5.0)
+
+            train_op = optimizer.apply_gradients(
+                zip(clip_grads, tvars), global_step=global_step)
+
+            new_global_step = global_step + 1
+            train_op = tf.group(train_op, [tf.assign(global_step, new_global_step)])
+
             output_spec = tf.estimator.EstimatorSpec(mode=mode, loss=total_loss, train_op=train_op)
         elif mode == tf.estimator.ModeKeys.PREDICT:
             predictions = {"logits": logits, "labels": features["labels"], "per_loss": per_loss}
@@ -197,7 +209,7 @@ def pad_examples(filename, statistic):
     def _pad():
         tag = True
         with open(filename, "rb") as fr:
-            for input_extract, q_type, label_ids, layer_output in tqdm(_loop_load(fr)):
+            for input_extract, q_type, label_ids, layer_output in _loop_load(fr):
                 sent1 = layer_output[input_extract == 1]
                 sent2 = layer_output[input_extract == 2]
                 sent3 = layer_output[input_extract == 3]

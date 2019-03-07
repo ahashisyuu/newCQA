@@ -4,7 +4,7 @@ from tensorflow.contrib.layers import xavier_initializer
 from tensorflow.contrib.rnn import DropoutWrapper
 from tensorflow.python.ops.rnn import dynamic_rnn
 from tensorflow.python.ops.rnn_cell_impl import GRUCell
-from layers.TriangularUpdate import TriangularCell
+from layers.TriangularWOupsent import TriangularCell
 from layers.BiGRU import Dropout
 from modeling import transformer_model, gelu, create_attention_mask_from_input_mask
 
@@ -172,7 +172,8 @@ class BertCQAModel:
                                                                                     shape=[]))
 
             def _trans(_sent, _mask):
-                return highway(_sent)
+                # return highway(_sent)
+                return _sent
 
             sent_transformer = _trans
 

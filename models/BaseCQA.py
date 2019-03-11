@@ -6,6 +6,7 @@ from tensorflow.python.ops.rnn import dynamic_rnn
 from tensorflow.python.ops.rnn_cell_impl import GRUCell
 from layers.TriangularNew import TriangularCell
 from layers.BiGRU import Dropout
+from layers.BiGRU import NativeGRU as BiGRU
 from modeling import transformer_model, gelu, create_attention_mask_from_input_mask
 
 
@@ -87,6 +88,10 @@ class BertCQAModel:
             self.mask2 = features["mask2"]
             self.mask3 = features["mask3"]
 
+            self.l1 = tf.cast(tf.reduce_sum(self.mask1, axis=-1), tf.int32)
+            self.l2 = tf.cast(tf.reduce_sum(self.mask2, axis=-1), tf.int32)
+            self.l3 = tf.cast(tf.reduce_sum(self.mask3, axis=-1), tf.int32)
+
             self.mark0 = features["mark0"]
             self.mark1 = features["mark1"]
             self.mark2 = features["mark2"]
@@ -148,12 +153,26 @@ class BertCQAModel:
         return _trans_v2
 
     def build_model(self):
+        # with tf.variable_scope("encode"):
+        #     batch_size = tf.shape(self.sent1)[0]
+        #     s1_len, dim = self.sent1.get_shape().as_list()[1:]
+        #     s2_len, _ = self.sent2.get_shape()[1:]
+        #     s3_len, _ = self.sent3.get_shape()[1:]
+        #     is_train = tf.constant(self.is_training, dtype=tf.bool, shape=[])
+        #
+        #     rnn1 = BiGRU(num_layers=1, num_units=150,
+        #                  batch_size=batch_size, input_size=dim,
+        #                  keep_prob=self.input_keep_prob, is_train=is_train, scope='q')
+        #     self.sent1 = rnn1(self.sent1, self.l1)
+        #     self.sent2 = rnn1(self.sent2, self.l2)
+        #     self.sent3 = rnn1(self.sent3, self.l3)
+
         with tf.variable_scope("inferring_module"):
             batch_size = tf.shape(self.sent1)[0]
             s1_len, dim = self.sent1.get_shape().as_list()[1:]
             s2_len, _ = self.sent2.get_shape()[1:]
             s3_len, _ = self.sent3.get_shape()[1:]
-
+            # is_train = tf.constant(self.is_training, dtype=tf.bool, shape=[])
             sr_cell = GRUCell(num_units=dim, activation=tf.nn.relu)
 
             if self.is_training:
@@ -167,9 +186,7 @@ class BertCQAModel:
             sent_cell = r_cell = sr_cell
 
             # sent_transformer = self.sent_transformer(hidden_size=dim)
-            highway = MultiLayerHighway(dim, 1, keep_prob=1.0, is_train=tf.constant(self.is_training,
-                                                                                    dtype=tf.bool,
-                                                                                    shape=[]))
+            # highway = MultiLayerHighway(dim, 1, keep_prob=1.0, is_train=is_train)
 
             def _trans(_sent, _mask):
                 # return highway(_sent)

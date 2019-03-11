@@ -5,7 +5,8 @@ import pickle as pkl
 import tensorflow as tf
 
 from tqdm import tqdm
-from BertCQAModel import BertCQAModel
+from BertCQAModel import TextCNN, MultiLayerHighway
+from models.BaseCQA import BertCQAModel
 from layers.optimization import create_optimizer
 from keras_preprocessing.sequence import pad_sequences
 from tensorflow.python.training.training_util import _get_or_create_global_step_read as get_global_step
@@ -18,11 +19,11 @@ from utils import PRF, eval_reranker, print_metrics
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = '2'
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--model_dir", type=str, default="./models/triangular_model")
+parser.add_argument("--model_dir", type=str, default="./models/triangularN_model")
 parser.add_argument("--save_checkpoints_steps", type=int, default=1000)
 
 parser.add_argument("--lr", type=float, default=2e-5)
-parser.add_argument("--num_train_steps", type=int, default=24000)
+parser.add_argument("--num_train_steps", type=int, default=44000)
 parser.add_argument("--batch_size", type=int, default=4)
 
 parser.add_argument("--train_filenames", type=str, default="datasetFORtri")
@@ -103,45 +104,69 @@ def model_fn_builder(num_labels, learning_rate, num_train_steps, config):
         for name in sorted(features.keys()):
             tf.logging.info("  name = %s, shape = %s" % (name, features[name].shape))
 
-        # sent1 = features["sent1"]
-        # sent2 = features["sent2"]
-        # sent3 = features["sent3"]
-        #
-        # mask1 = features["mask1"]
-        # mask2 = features["mask2"]
-        # mask3 = features["mask3"]
-        #
-        # q_type = features["q_type"]
-        # labels = features["labels"]
-
-        # features["mark0"] = features["sent1"]  # (B, L1)
-        _features = dict()
-        _features["mark1"] = None
-        _features["mark2"] = None
-        _features["mark3"] = None
+        features["mark1"] = None
+        features["mark2"] = None
+        features["mark3"] = None
 
         is_training = (mode == tf.estimator.ModeKeys.TRAIN)
 
         # EMBEDDING
         embed_func = glove_embedding(config.embed_file)
-        _features["sent1"] = embed_func(features["sent1"])
-        _features["sent2"] = embed_func(features["sent2"])
-        _features["sent3"] = embed_func(features["sent3"])
-        _features["mask1"] = features["mask1"]
-        _features["mask2"] = features["mask2"]
-        _features["mask3"] = features["mask3"]
-        _features["q_type"] = features["q_type"]
-        _features["labels"] = features["labels"]
+        features["sent1"] = embed_func(features["sent1"])
+        features["sent2"] = embed_func(features["sent2"])
+        features["sent3"] = embed_func(features["sent3"])
+        features["mask1"] = features["mask1"]
+        features["mask2"] = features["mask2"]
+        features["mask3"] = features["mask3"]
+        features["q_type"] = features["q_type"]
+        features["labels"] = features["labels"]
 
-        _features["mark0"] = _features["sent1"][:, 0, :]  # (B, dim)
+        features["mark0"] = features["sent1"][:, 0, :]  # (B, dim)
 
-        total_loss, logits, per_loss = _create_model(is_training, _features, num_labels, config)
+        def _char_embed():
+            char_embedding = tf.get_variable('char_mat', [334 + 1, 15], trainable=True)
+            text_cnn = TextCNN(15, [1, 2, 3, 4, 5, 6], 50)
+
+            def _return_embed(_sent_char):
+                _batch_size = tf.shape(_sent_char)[0]
+                _sent_char = tf.reshape(_sent_char, [-1, tf.shape(_sent_char)[2]])
+                _smask = tf.cast(tf.cast(_sent_char, tf.bool), tf.float32)
+
+                _char_emb = tf.nn.embedding_lookup(char_embedding, _sent_char)
+                _char_emb = text_cnn(_char_emb, _smask)
+                _char_emb = tf.reshape(_char_emb, [_batch_size, -1, 300])
+                return _char_emb
+            return _return_embed
+
+        char_embed = _char_embed()
+        sent1_char = char_embed(features["sent1_char"])
+        sent2_char = char_embed(features["sent2_char"])
+        sent3_char = char_embed(features["sent3_char"])
+
+        features["sent1"] = tf.concat([features["sent1"], sent1_char], axis=-1)
+        features["sent2"] = tf.concat([features["sent2"], sent2_char], axis=-1)
+        features["sent3"] = tf.concat([features["sent3"], sent3_char], axis=-1)
+        highway = MultiLayerHighway(300, 1, tf.nn.elu, 0.9, tf.constant(is_training))
+        features["sent1"] = highway(features["sent1"])
+        features["sent2"] = highway(features["sent2"])
+        features["sent3"] = highway(features["sent3"])
+
+        total_loss, logits, per_loss = _create_model(is_training, features, num_labels, config)
 
         if mode == tf.estimator.ModeKeys.TRAIN:
             num_warmup_steps = int(num_train_steps * 0.1)
-            train_op = create_optimizer(total_loss, learning_rate,
-                                        num_train_steps, num_warmup_steps,
-                                        False)
+            # train_op = create_optimizer(total_loss, learning_rate,
+            #                             num_train_steps, num_warmup_steps,
+            #                             False)
+            global_step = tf.train.get_or_create_global_step()
+            optimizer = tf.train.AdamOptimizer(learning_rate)
+            grads = optimizer.compute_gradients(total_loss)
+            gradients, tvars = zip(*grads)
+            (clip_grads, _) = tf.clip_by_global_norm(gradients, clip_norm=5.0)
+
+            train_op = optimizer.apply_gradients(
+                zip(clip_grads, tvars), global_step=global_step)
+
             output_spec = tf.estimator.EstimatorSpec(mode=mode, loss=total_loss, train_op=train_op)
         elif mode == tf.estimator.ModeKeys.PREDICT:
             predictions = {"logits": logits, "labels": features["labels"], "per_loss": per_loss}
@@ -167,6 +192,9 @@ def get_examples(filename,
         sent1 = []
         sent2 = []
         sent3 = []
+        sent1_char = []
+        sent2_char = []
+        sent3_char = []
         q_type = []
         label_ids = []
         if is_training:
@@ -177,6 +205,10 @@ def get_examples(filename,
                 sent2 += samples["q_body_lemma_index"].values.tolist()
                 sent3 += samples["cTEXT_lemma_index"].values.tolist()
 
+                sent1_char += samples['q_sub_lemma_char_index'].values.tolist()
+                sent2_char += samples['q_body_lemma_char_index'].values.tolist()
+                sent3_char += samples['cTEXT_lemma_char_index'].values.tolist()
+
                 q_type += samples["cate_index"].values.tolist()
                 label_ids += samples["Rrel_index"].values.tolist()
 
@@ -186,6 +218,10 @@ def get_examples(filename,
             sent1 += samples["q_sub_lemma_index"].values.tolist()
             sent2 += samples["q_body_lemma_index"].values.tolist()
             sent3 += samples["cTEXT_lemma_index"].values.tolist()
+
+            sent1_char += samples['q_sub_lemma_char_index'].values.tolist()
+            sent2_char += samples['q_body_lemma_char_index'].values.tolist()
+            sent3_char += samples['cTEXT_lemma_char_index'].values.tolist()
 
             q_type += samples["cate_index"].values.tolist()
             label_ids += samples["Rrel_index"].values.tolist()
@@ -205,6 +241,13 @@ def get_examples(filename,
         sent3 = pad_sequences(sent3, maxlen=sent3_length,
                               padding="post", truncating="post")
 
+        sent1_char = pad_sequences(sent1_char, maxlen=sent1_length,
+                                   padding="post", truncating="post")
+        sent2_char = pad_sequences(sent2_char, maxlen=sent2_length,
+                                   padding="post", truncating="post")
+        sent3_char = pad_sequences(sent3_char, maxlen=sent3_length,
+                                   padding="post", truncating="post")
+
         # for s1, s2, s3 in zip(sent1, sent2, sent3):
         #     for a in s1.tolist():
         #         assert type(a) == int
@@ -222,6 +265,7 @@ def get_examples(filename,
         label_ids = np.asarray(label_ids)
 
         return {"sent1": sent1, "sent2": sent2, "sent3": sent3,
+                "sent1_char": sent1_char, "sent2_char": sent2_char, "sent3_char": sent3_char,
                 "mask1": mask1, "mask2": mask2, "mask3": mask3,
                 "q_type": q_type, "labels": label_ids, "samples_num": ls1}
 
@@ -248,6 +292,13 @@ def input_fn_builder(filenames,
                 tf.constant(value=all_data["sent2"], shape=[samples_num, sent2_length], dtype=tf.int32),
             "sent3":
                 tf.constant(value=all_data["sent3"], shape=[samples_num, sent3_length], dtype=tf.int32),
+
+            "sent1_char":
+                tf.constant(value=all_data["sent1_char"], shape=[samples_num, sent1_length, 20], dtype=tf.int32),
+            "sent2_char":
+                tf.constant(value=all_data["sent2_char"], shape=[samples_num, sent2_length, 20], dtype=tf.int32),
+            "sent3_char":
+                tf.constant(value=all_data["sent3_char"], shape=[samples_num, sent3_length, 20], dtype=tf.int32),
 
             "mask1":
                 tf.constant(value=all_data["mask1"], shape=[samples_num, sent1_length], dtype=tf.float32),

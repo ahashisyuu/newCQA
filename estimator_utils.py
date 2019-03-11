@@ -5,8 +5,9 @@ import tensorflow as tf
 
 from tqdm import tqdm
 from tensorflow.contrib.layers import xavier_initializer
-from models.CBertCQAModel import BertCQAModel
-from layers.optimization import create_optimizer
+# from models.CBertCQAModel import BertCQAModel
+# from layers.optimization import create_optimizer
+from models.BaseCQA import BertCQAModel
 
 
 def _create_model(is_training, features, num_labels, config):
@@ -181,9 +182,6 @@ def model_fn_builder(num_labels, learning_rate, num_train_steps, config):
 
             train_op = optimizer.apply_gradients(
                 zip(clip_grads, tvars), global_step=global_step)
-
-            new_global_step = global_step + 1
-            train_op = tf.group(train_op, [tf.assign(global_step, new_global_step)])
 
             output_spec = tf.estimator.EstimatorSpec(mode=mode, loss=total_loss, train_op=train_op)
         elif mode == tf.estimator.ModeKeys.PREDICT:

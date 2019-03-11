@@ -222,7 +222,7 @@ class TriangularCell(LayerRNNCell):
 
         # <3> UPDATE
         values_t = values_tm + gate * new_values
-        values = tf.nn.l2_normalize(values_t)
+        values = tf.nn.l2_normalize(values_t, axis=2)
         values = tf.reshape(values, [-1, self.keys_num * self.dim])
 
         r_cell_input = tf.reshape(new_values, [-1, self.dim])

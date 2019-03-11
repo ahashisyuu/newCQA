@@ -102,8 +102,8 @@ class CQAModel:
                                         trainable=False)
         self.args = args
         self.batch_size = None
-        # self.Q_maxlen = args.q_max_len
-        # self.C_maxlen = args.c_max_len
+        self.Q_maxlen = args.q_max_len
+        self.C_maxlen = args.c_max_len
         self.char_max_len = args.char_max_len
         self.char_num = char_num
 
@@ -117,8 +117,8 @@ class CQAModel:
         self.Q_mask = tf.cast(tf.cast(self.QText, tf.bool), tf.float32)
         self.C_mask = tf.cast(tf.cast(self.CText, tf.bool), tf.float32)
         # self.q_features, self.c_features = self.equal_features(self.QText, self.CText)
-        self.Q_maxlen = tf.reduce_max(self.Q_len)
-        self.C_maxlen = tf.reduce_max(self.C_len)
+        # self.Q_maxlen = tf.reduce_max(self.Q_len)
+        # self.C_maxlen = tf.reduce_max(self.C_len)
 
         self.N = tf.shape(self.Q_mask)[0]
 

@@ -12,7 +12,7 @@ config = Config()
 parser = argparse.ArgumentParser()
 
 parser.add_argument('--mode', type=str, default='train')
-parser.add_argument('--model', type=str, default='Baseline3_4')
+parser.add_argument('--model', type=str, default='BaselineCell')
 parser.add_argument('--train_list', type=list, default=['15train', '15dev', '15test', '16train1', '16train2', '16dev'])
 parser.add_argument('--dev_list', type=list, default=['16test'])
 parser.add_argument('--test_list', type=list, default=['16test'])

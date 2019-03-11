@@ -1,6 +1,6 @@
 class Config:
     lr = 5e-5
-    dropout = 0.2
+    dropout = 0.1
 
     q_max_len = 110
     c_max_len = 150
@@ -15,7 +15,7 @@ class Config:
     patience = 5
     k_fold = 0
     categories_num = 2
-    period = 150
+    period = 10
 
     need_punct = False
     wipe_num = 0

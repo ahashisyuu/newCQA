@@ -8,13 +8,16 @@ from tensorflow.python.ops.rnn import dynamic_rnn
 from tensorflow.contrib.rnn import DropoutWrapper
 
 
-class Baseline3_4(CQAModel):
+class BaselineCell(CQAModel):
     def build_model(self):
         with tf.variable_scope('baseline', initializer=tf.glorot_uniform_initializer()):
             units = 300
             Q, C = self.QS, self.CT
             Q_len, C_len = self.Q_len, self.C_len
             batch_size = tf.shape(self.QS)[0]
+
+            update_num = 3
+            keys_num = 6
 
             with tf.variable_scope('encode'):
                 rnn1 = BiGRU(num_layers=1, num_units=units,
@@ -27,8 +30,14 @@ class Baseline3_4(CQAModel):
                 C_sequence = rnn2(C, seq_len=C_len, return_type=1)
                 # C_sequence = tf.reshape(C_sequence, [-1, self.C_maxlen, 2*units])
 
-            with tf.variable_scope("inferring_module"):
+            with tf.variable_scope("memory"):
                 dim = 2 * units
+                keys_embedding = tf.get_variable("keys_embedding",
+                                                 [keys_num, dim],
+                                                 dtype=tf.float32,
+                                                 trainable=True)
+
+            with tf.variable_scope("inferring_module"):
                 sr_cell = GRUCell(num_units=dim, activation=tf.nn.relu)
 
                 if self.is_training:
@@ -52,17 +61,18 @@ class Baseline3_4(CQAModel):
 
                 tri_cell = DoubleCell(num_units=256,
                                       sent_cell=sent_cell, r_cell=r_cell, sentence_transformer=sent_transformer,
-                                      sent1=self.sent1, sent2=self.sent2,
-                                      sent1_length=s1_len,
-                                      sent2_length=s2_len,
-                                      dim=self.encoding_size,
-                                      keys=self._keys_embedding,
-                                      sent1_mask=self.mask1, sent2_mask=self.mask2,
+                                      sent1=Q_sequence, sent2=C_sequence,
+                                      sent1_length=self.Q_maxlen,
+                                      sent2_length=self.C_maxlen,
+                                      dim=dim,
+                                      keys=keys_embedding,
+                                      sent1_mask=self.Q_mask, sent2_mask=self.C_mask,
                                       initializer=None, dtype=tf.float32)
 
-                fake_input = tf.tile(tf.expand_dims(self.mark0, axis=1), [1, self.config.update_num, 1])
+                fake_input = tf.tile(tf.expand_dims(Q_sequence[:, 0, :], axis=1), [1, update_num, 1])
                 init_state = tri_cell.zero_state(batch_size=batch_size, dtype=tf.float32)
 
+                # print(fake_input)
                 if self.is_training:
                     tri_cell = DropoutWrapper(cell=tri_cell,
                                               input_keep_prob=self.dropout_keep_prob,
@@ -75,25 +85,9 @@ class Baseline3_4(CQAModel):
                 output, last_state = dynamic_rnn(cell=tri_cell,
                                                  inputs=fake_input,
                                                  initial_state=init_state)
-                self.output = [tf.reshape(a, [-1, self.config.keys_num, self.encoding_size]) for a in last_state[3:6]]
+                refer_output = tf.reshape(last_state[2], [-1, keys_num, dim])  # (B, K, dim)
 
-
-            Q_vec = tf.reduce_mean(Q_sequence, axis=1)  # (B, 2H)
-
-            with tf.variable_scope('attention'):
-                q_att = tf.tile(tf.expand_dims(Q_vec, 1), [1, self.C_maxlen, 1])
-                att_pre = tf.layers.dense(tf.concat([q_att, C_sequence], axis=2), units, tf.tanh)
-                v = tf.get_variable('v', [units, 1], tf.float32)
-                score = tf.squeeze(tf.keras.backend.dot(att_pre, v), 2)  # (B, L)
-                # score -= (1 - tf.expand_dims(self.C_mask, 2)) * 10000
-                print(score, C_sequence)
-                s_value, s_indices = tf.nn.top_k(score, k=10, sorted=False)  # (B, k), (B, k)
-                C_select = tf.batch_gather(C_sequence, s_indices)
-                alpha = tf.expand_dims(tf.nn.softmax(s_value, 1), 2)
-                print(alpha)
-                C_vec = tf.reduce_sum(alpha * C_select, 1)
-
-            info = tf.concat([Q_vec, C_vec, Q_vec * C_vec], axis=1)
+            info = tf.reduce_mean(refer_output, axis=1)  # (B, dim)
             median = tf.layers.dense(info, 300, activation=tf.tanh)
             output = tf.layers.dense(median, self.args.categories_num, activation=tf.identity)
 

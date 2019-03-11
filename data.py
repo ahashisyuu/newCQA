@@ -114,11 +114,11 @@ class BatchDatasets:
         return pad_sequences(e, padding='post', truncating='post', maxlen=maxlen)
 
     def padding(self, qtext, q_len, ctext, c_len, q_char, c_char, q_bert=None, c_bert=None):
-        q_max_len = min(max(q_len), self.q_max_len)
-        # q_max_len = self.q_max_len
+        # q_max_len = min(max(q_len), self.q_max_len)
+        q_max_len = self.q_max_len
         q_len[q_len > q_max_len] = q_max_len
-        c_max_len = min(max(c_len), self.c_max_len)
-        # c_max_len = self.c_max_len
+        # c_max_len = min(max(c_len), self.c_max_len)
+        c_max_len = self.c_max_len
         c_len[c_len > c_max_len] = c_max_len
         cur_max_len = [q_max_len, c_max_len]
 

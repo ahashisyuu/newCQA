@@ -408,6 +408,14 @@ class CQAModel:
                         self.is_training = False
                         self.dropout = 1.0
 
+                        # output = self.sess.run(self.double_output, feed_dict)
+                        # print(len(output), type(output))
+                        # print(output[0][0])
+                        # print("=========================")
+                        # print(output[2][0])
+                        # print("=========================")
+                        # print(output[3][0])
+                        # print("=========================")
                         # print('\n---------------------------------------------')
                         # print('process dev data')
                         # dev_data = batch_dataset.batch_dev_data()
@@ -463,6 +471,11 @@ class CQAModel:
                         saver.save(self.sess, filename)
                         # if self.global_step >= self.args.max_steps:
                         #     break
+
+                        self.is_train = True
+                        self.is_training = True
+                        self.dropout = config.dropout
+
 
                     tbar.update(batch_dataset.batch_size)
 

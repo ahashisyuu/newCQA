@@ -15,7 +15,7 @@ class Config:
     patience = 5
     k_fold = 0
     categories_num = 2
-    period = 10
+    period = 500
 
     need_punct = False
     wipe_num = 0

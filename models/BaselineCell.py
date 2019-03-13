@@ -8,6 +8,23 @@ from tensorflow.python.ops.rnn import dynamic_rnn
 from tensorflow.contrib.rnn import DropoutWrapper
 
 
+def wrapper(is_train, sr_cell, keep_prob, dim):
+    def _true_func():
+        _sr_cell = DropoutWrapper(cell=sr_cell,
+                                  input_keep_prob=keep_prob,
+                                  output_keep_prob=keep_prob,
+                                  state_keep_prob=keep_prob,
+                                  variational_recurrent=True,
+                                  input_size=dim,
+                                  dtype=tf.float32)
+        return _sr_cell
+
+    def _false_func():
+        return sr_cell
+
+    return tf.cond(is_train, _true_func, _false_func)
+
+
 class BaselineCell(CQAModel):
     def build_model(self):
         with tf.variable_scope('baseline', initializer=tf.glorot_uniform_initializer()):
@@ -40,14 +57,7 @@ class BaselineCell(CQAModel):
             with tf.variable_scope("inferring_module"):
                 sr_cell = GRUCell(num_units=dim, activation=tf.nn.relu)
 
-                if self.is_training:
-                    sr_cell = DropoutWrapper(cell=sr_cell,
-                                             input_keep_prob=self.dropout_keep_prob,
-                                             output_keep_prob=self.dropout_keep_prob,
-                                             state_keep_prob=self.dropout_keep_prob,
-                                             variational_recurrent=True,
-                                             input_size=dim,
-                                             dtype=tf.float32)
+                # sr_cell = wrapper(self._is_train, sr_cell, self.dropout_keep_prob, dim)
                 sent_cell = r_cell = sr_cell
 
                 # sent_transformer = self.sent_transformer(hidden_size=dim)
@@ -65,26 +75,20 @@ class BaselineCell(CQAModel):
                                       sent1_length=self.Q_maxlen,
                                       sent2_length=self.C_maxlen,
                                       dim=dim,
+                                      use_bias=False, activation=tf.nn.tanh,
                                       keys=keys_embedding,
-                                      sent1_mask=self.Q_mask, sent2_mask=self.C_mask,
+                                      sent1_mask=None, sent2_mask=None,
                                       initializer=None, dtype=tf.float32)
 
                 fake_input = tf.tile(tf.expand_dims(Q_sequence[:, 0, :], axis=1), [1, update_num, 1])
-                init_state = tri_cell.zero_state(batch_size=batch_size, dtype=tf.float32)
+                self.init_state = tri_cell.zero_state(batch_size=batch_size, dtype=tf.float32)
 
                 # print(fake_input)
-                if self.is_training:
-                    tri_cell = DropoutWrapper(cell=tri_cell,
-                                              input_keep_prob=self.dropout_keep_prob,
-                                              output_keep_prob=self.dropout_keep_prob,
-                                              state_keep_prob=self.dropout_keep_prob,
-                                              variational_recurrent=True,
-                                              input_size=fake_input.get_shape()[2],
-                                              dtype=tf.float32)
+                # tri_cell = wrapper(self._is_train, tri_cell, self.dropout_keep_prob, dim)
 
-                output, last_state = dynamic_rnn(cell=tri_cell,
+                self.double_output, last_state = dynamic_rnn(cell=tri_cell,
                                                  inputs=fake_input,
-                                                 initial_state=init_state)
+                                                 initial_state=self.init_state)
                 refer_output = tf.reshape(last_state[2], [-1, keys_num, dim])  # (B, K, dim)
 
             info = tf.reduce_mean(refer_output, axis=1)  # (B, dim)

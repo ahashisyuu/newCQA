@@ -48,14 +48,14 @@ class BaselineCell(CQAModel):
                 # C_sequence = tf.reshape(C_sequence, [-1, self.C_maxlen, 2*units])
 
             with tf.variable_scope("memory"):
-                dim = 2 * units
-                keys_embedding = tf.get_variable("keys_embedding",
-                                                 [keys_num, dim],
-                                                 dtype=tf.float32,
-                                                 trainable=True)
+                rdim = 256
+                # keys_embedding = tf.get_variable("keys_embedding",
+                #                                  [rdim],
+                #                                  dtype=tf.float32,
+                #                                  trainable=True)
 
             with tf.variable_scope("inferring_module"):
-                sr_cell = GRUCell(num_units=dim, activation=tf.nn.relu)
+                sr_cell = GRUCell(num_units=rdim, activation=tf.nn.relu)
 
                 # sr_cell = wrapper(self._is_train, sr_cell, self.dropout_keep_prob, dim)
                 sent_cell = r_cell = sr_cell
@@ -69,14 +69,14 @@ class BaselineCell(CQAModel):
 
                 sent_transformer = _trans
 
-                tri_cell = DoubleCell(num_units=256,
+                tri_cell = DoubleCell(num_units=rdim,
                                       sent_cell=sent_cell, r_cell=r_cell, sentence_transformer=sent_transformer,
                                       sent1=Q_sequence, sent2=C_sequence,
                                       sent1_length=self.Q_maxlen,
                                       sent2_length=self.C_maxlen,
-                                      dim=dim,
-                                      use_bias=False, activation=tf.nn.tanh,
-                                      keys=keys_embedding,
+                                      dim=2*units,
+                                      use_bias=False, activation=tf.nn.selu,
+                                      keys=None,
                                       sent1_mask=None, sent2_mask=None,
                                       initializer=None, dtype=tf.float32)
 
@@ -87,11 +87,11 @@ class BaselineCell(CQAModel):
                 # tri_cell = wrapper(self._is_train, tri_cell, self.dropout_keep_prob, dim)
 
                 self.double_output, last_state = dynamic_rnn(cell=tri_cell,
-                                                 inputs=fake_input,
-                                                 initial_state=self.init_state)
-                refer_output = tf.reshape(last_state[2], [-1, keys_num, dim])  # (B, K, dim)
+                                                             inputs=fake_input,
+                                                             initial_state=self.init_state)
+                refer_output = last_state[2]  # (B, dim)
 
-            info = tf.reduce_mean(refer_output, axis=1)  # (B, dim)
+            info = refer_output
             median = tf.layers.dense(info, 300, activation=tf.tanh)
             output = tf.layers.dense(median, self.args.categories_num, activation=tf.identity)
 

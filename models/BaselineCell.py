@@ -33,7 +33,7 @@ class BaselineCell(CQAModel):
             Q_len, C_len = self.Q_len, self.C_len
             batch_size = tf.shape(self.QS)[0]
 
-            update_num = 3
+            update_num = 1
             keys_num = 6
 
             with tf.variable_scope('encode'):

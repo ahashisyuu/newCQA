@@ -135,6 +135,26 @@ class DoubleCell(LayerRNNCell):
 
         return m, DoubleStateTuple(*state)
 
+    @staticmethod
+    def top_k_att(matrix, sentence, k=1, transpose=False):
+        """
+        sentence: (B, L1, L2, dim)
+
+        return: (B, L1, dim)
+
+        NOTE: if transpose is False, return (B, L2, dim)
+
+        """
+        matrix = tf.squeeze(matrix, axis=3)
+        if transpose is True:
+            matrix = tf.transpose(matrix, perm=[0, 2, 1])
+            sentence = tf.transpose(sentence, perm=[0, 2, 1, 3])
+        values, indices = tf.nn.top_k(matrix, k=k, sorted=False)  # (B, L, k)
+        s_select = tf.batch_gather(sentence, indices)
+        alpha = tf.expand_dims(tf.nn.softmax(values, 2), 3)
+        return tf.reduce_sum(alpha * s_select, axis=2)  # (B, L, DIM)
+
+
     def update_sentence(self,
                         s1, s1_len, s1_mask,
                         s2, s2_len, s2_mask,
@@ -172,11 +192,15 @@ class DoubleCell(LayerRNNCell):
             res_matrix1 = res_matrix
             res_matrix2 = res_matrix
 
-        score1 = tf.nn.softmax(res_matrix1, axis=1)
-        score2 = tf.nn.softmax(res_matrix2, axis=2)
+        # adding TOP K
+        m_s2 = self.top_k_att(res_matrix1, s1_tile, k=10, transpose=True)
+        m_s1 = self.top_k_att(res_matrix2, s2_tile, k=10, transpose=False)
 
-        m_s2 = tf.reduce_sum(score1 * s1_tile, axis=1)  # (B, L2, dim)
-        m_s1 = tf.reduce_sum(score2 * s2_tile, axis=2)  # (B, L1, dim)
+        # score1 = tf.nn.softmax(res_matrix1, axis=1)
+        # score2 = tf.nn.softmax(res_matrix2, axis=2)
+        #
+        # m_s2 = tf.reduce_sum(score1 * s1_tile, axis=1)  # (B, L2, dim)
+        # m_s1 = tf.reduce_sum(score2 * s2_tile, axis=2)  # (B, L1, dim)
 
         # # <2>[]
         # s1_cat = tf.concat([m_s1 - s1, m_s1 * s1], axis=2)

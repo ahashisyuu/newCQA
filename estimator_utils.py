@@ -7,7 +7,7 @@ from tqdm import tqdm
 from tensorflow.contrib.layers import xavier_initializer
 # from models.CBertCQAModel import BertCQAModel
 # from layers.optimization import create_optimizer
-from models.BaseCQA import BertCQAModel
+from models.BertCQAModelAlign import BertCQAModel
 
 
 def _create_model(is_training, features, num_labels, config):

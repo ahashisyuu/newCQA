@@ -8,7 +8,7 @@ from estimator_utils import model_fn_builder, input_fn_builder_v2 as input_fn_bu
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = '2'
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--model_dir", type=str, default="./models/bert_model")
+parser.add_argument("--model_dir", type=str, default="./models/bert_model2")
 parser.add_argument("--save_checkpoints_steps", type=int, default=1000)
 
 parser.add_argument("--lr", type=float, default=2e-5)
@@ -23,7 +23,7 @@ parser.add_argument("--max_sent2_length", type=int, default=110)
 parser.add_argument("--max_sent3_length", type=int, default=152)
 
 parser.add_argument("--keys_num", type=int, default=6)
-parser.add_argument("--update_num", type=int, default=3)
+parser.add_argument("--update_num", type=int, default=2)
 
 
 def main(args):

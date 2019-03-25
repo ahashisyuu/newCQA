@@ -6,7 +6,7 @@ import tensorflow as tf
 
 from tqdm import tqdm
 from BertCQAModel import TextCNN, MultiLayerHighway
-from models.BaseCQA import BertCQAModel
+from models.BertCQAModelAlign import BertCQAModel
 from layers.optimization import create_optimizer
 from keras_preprocessing.sequence import pad_sequences
 from tensorflow.python.training.training_util import _get_or_create_global_step_read as get_global_step

@@ -31,11 +31,11 @@ class Baseline3_4(CQAModel):
                 v = tf.get_variable('v', [units, 1], tf.float32)
                 score = tf.squeeze(tf.keras.backend.dot(att_pre, v), 2)  # (B, L)
                 # score -= (1 - tf.expand_dims(self.C_mask, 2)) * 10000
-                print(score, C_sequence)
+                # print(score, C_sequence)
                 s_value, s_indices = tf.nn.top_k(score, k=10, sorted=False)  # (B, k), (B, k)
                 C_select = tf.batch_gather(C_sequence, s_indices)
                 alpha = tf.expand_dims(tf.nn.softmax(s_value, 1), 2)
-                print(alpha)
+                # print(alpha)
                 C_vec = tf.reduce_sum(alpha * C_select, 1)
 
             info = tf.concat([Q_vec, C_vec, Q_vec * C_vec], axis=1)

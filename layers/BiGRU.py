@@ -1,4 +1,5 @@
 import tensorflow as tf
+from tensorflow.python.ops.rnn_cell import GRUCell
 
 
 def Dropout(args, keep_prob, is_train, mode="recurrent", name=None):
@@ -142,7 +143,8 @@ class CudnnGRU:
 
 class NativeGRU:
 
-    def __init__(self, num_layers, num_units, batch_size, input_size, keep_prob=1.0, is_train=None, scope="native_gru"):
+    def __init__(self, num_layers, num_units, batch_size, input_size,
+                 keep_prob=1.0, is_train=None, scope="native_gru", activation=tf.nn.tanh):
         self.num_layers = num_layers
         self.grus = []
         self.inits = []
@@ -150,8 +152,8 @@ class NativeGRU:
         self.scope = scope
         for layer in range(num_layers):
             input_size_ = input_size if layer == 0 else 2 * num_units
-            gru_fw = tf.contrib.rnn.GRUCell(num_units)
-            gru_bw = tf.contrib.rnn.GRUCell(num_units)
+            gru_fw = GRUCell(num_units, activation=activation)
+            gru_bw = GRUCell(num_units, activation=activation)
             init_fw = tf.tile(tf.Variable(
                 tf.zeros([1, num_units])), [batch_size, 1])
             init_bw = tf.tile(tf.Variable(

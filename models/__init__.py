@@ -7,6 +7,7 @@ from .Baseline3_2 import Baseline3_2
 from .Baseline3_3 import Baseline3_3
 from .Baseline3_3_2 import Baseline3_3_2
 from .Baseline3_4 import Baseline3_4
+from .Baseline3_4_2 import Baseline3_4_2
 from .Baseline3_4_Top10 import Baseline3_4_Top10
 from .Baseline3_5 import Baseline3_5
 from .Baseline4 import Baseline4
@@ -21,6 +22,7 @@ from .Baseline9 import Baseline9
 from .Baseline4_margin import Baseline4_margin
 from .Baseline5_margin import Baseline5 as Baseline5_margin
 from .BaselineCell import BaselineCell
+from .BaselineCellD2 import BaselineCell2
 from .HyperQA_margin import HyperQA
 
 model_dict = globals()

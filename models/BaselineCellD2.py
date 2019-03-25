@@ -1,6 +1,6 @@
 import tensorflow as tf
 
-from layers.DoubleUpdate import DoubleCell
+from layers.DoubleUpdate2 import DoubleCell
 from .CQAModel import CQAModel
 from layers.BiGRU import NativeGRU as BiGRU
 from tensorflow.python.ops.rnn_cell import GRUCell
@@ -25,7 +25,7 @@ def wrapper(is_train, sr_cell, keep_prob, dim):
     return tf.cond(is_train, _true_func, _false_func)
 
 
-class BaselineCell(CQAModel):
+class BaselineCell2(CQAModel):
     def build_model(self):
         with tf.variable_scope('baseline', initializer=tf.glorot_uniform_initializer()):
             units = 300
@@ -33,7 +33,7 @@ class BaselineCell(CQAModel):
             Q_len, C_len = self.Q_len, self.C_len
             batch_size = tf.shape(self.QS)[0]
 
-            update_num = 3
+            update_num = 2
             keys_num = 6
 
             with tf.variable_scope('encode'):

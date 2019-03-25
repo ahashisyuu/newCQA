@@ -23,7 +23,7 @@ parser.add_argument("--max_sent2_length", type=int, default=110)
 parser.add_argument("--max_sent3_length", type=int, default=152)
 
 parser.add_argument("--keys_num", type=int, default=6)
-parser.add_argument("--update_num", type=int, default=3)
+parser.add_argument("--update_num", type=int, default=1)
 
 
 def main(args):

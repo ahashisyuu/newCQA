@@ -287,21 +287,18 @@ class CQAModel:
         label = []
         predict = []
         loss = []
-        with tqdm(total=steps_num, ncols=70) as tbar:
-            # processed_samples = 0
-            for batch_eva_data in eva_data:
-                batch_label = batch_eva_data[-1]
-                feed_dict = {inv: array for inv, array in zip(self.inputs, batch_eva_data)}
-                batch_loss, batch_predict = self.sess.run([self.loss, self.predict_prob], feed_dict=feed_dict)
-                label.append(batch_label)
-                loss.append(batch_loss * batch_label.shape[0])
-                predict.append(batch_predict)
+        # processed_samples = 0
+        for batch_eva_data in eva_data:
+            batch_label = batch_eva_data[-1]
+            feed_dict = {inv: array for inv, array in zip(self.inputs, batch_eva_data)}
+            batch_loss, batch_predict = self.sess.run([self.loss, self.predict_prob], feed_dict=feed_dict)
+            label.append(batch_label)
+            loss.append(batch_loss * batch_label.shape[0])
+            predict.append(batch_predict)
 
-                tbar.update(batch_label.shape[0])
-
-                # processed_samples += self.batch_size
-                # if processed_samples >= steps_num:
-                #     break
+            # processed_samples += self.batch_size
+            # if processed_samples >= steps_num:
+            #     break
 
         label = np.concatenate(label, axis=0)[:steps_num]
         predict = np.concatenate(predict, axis=0)[:steps_num]
@@ -309,6 +306,7 @@ class CQAModel:
         # predict = (predict > 0.5).astype('int32').reshape((-1,))
         metrics = PRF(label, predict.argmax(axis=-1))
         metrics['loss'] = loss
+
 
         MAP, AvgRec, MRR = eval_reranker(eva_ID, label, predict[:, 0])
         metrics['MAP'] = MAP
